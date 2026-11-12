@@ -1,10 +1,12 @@
 #import "TBShell.h"
 #import "TBAccount.h"
+#import "TBBackSwipe.h"
 #import "TBCore.h"
 #import "TBItemCell.h"
 #import "TBAccountController.h"
 #import "TBListController.h"
 #import "TBSearchController.h"
+#import "TBShortsController.h"
 #import "TBStore.h"
 #import "TBStyle.h"
 
@@ -13,7 +15,8 @@ static NSArray *rows(void) {
     return @[@[@"Subscriptions", @"Home Feed", @"home"], @[@"Subscriptions", @"Subscriptions", @"subs"],
              @[@"Library", @"Search", @"search"], @[@"Library", @"History", @"history"], @[@"Library", @"Watch Later", @"later"],
              @[@"Library", @"Liked Videos", @"like"], @[@"Library", @"Playlists", @"playlist"], @[@"Library", @"YouTube History", @"history"],
-             @[@"From YouTube", @"Live", @"star"], @[@"Account", @"Account", @"account"]];
+             @[@"From YouTube", @"Shorts", @"shorts"], @[@"From YouTube", @"Live", @"star"],
+             @[@"Account", @"Account", @"account"]];
 }
 
 @interface TBNav : UINavigationController
@@ -39,6 +42,9 @@ static __weak TBShell *g_shell;
     NSArray *_suggestions, *_sections;
     NSMutableDictionary *_roots;
     NSTimer *_debounce;
+    CGSize _swipeSize;                  /* shell size when a swipe back began */
+    UIButton *_extra;                   /* the top screen's header button */
+    __weak UIViewController *_extraOwner;
 }
 
 + (TBShell *)shared { return g_shell; }
@@ -121,6 +127,7 @@ static __weak TBShell *g_shell;
     [self addChildViewController:_nav];
     [_content addSubview:_nav.view];
     [_nav didMoveToParentViewController:self];
+    [self setUpBackSwipe];
     _sugg = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     _sugg.dataSource = self;
     _sugg.delegate = self;
@@ -148,9 +155,40 @@ static __weak TBShell *g_shell;
     return [t respondsToSelector:@selector(wantsFullWidth)] && [(id<TBFullWidth>)t wantsFullWidth];
 }
 
+- (void)setUpBackSwipe {
+    _backSwipe = [[TBBackSwipe alloc] initWithNav:_nav host:_content];
+    __weak TBShell *w = self;
+    _backSwipe.underFrame = ^CGRect(UIViewController *prev, BOOL *clearHost) {
+        TBShell *s = w;
+        CGRect b = s.view.bounds;
+        s->_swipeSize = b.size;
+        BOOL prevFull = [prev respondsToSelector:@selector(wantsFullWidth)] && [(id<TBFullWidth>)prev wantsFullWidth];
+        /* landscape, full-width screen over a list: the list goes where it will be after the pop, the guide shows
+         * through on the left (D49) */
+        if (b.size.width > b.size.height && [s topWantsFullWidth] && !prevFull) {
+            *clearHost = YES;
+            return CGRectMake(256, 44, b.size.width - 256, b.size.height - 44);
+        }
+        return s->_nav.view.frame;
+    };
+    _backSwipe.progress = ^(CGFloat p) { TBShell *s = w; if (s) s->_title.alpha = 1 - p; };
+    _backSwipe.willPop = ^(UIViewController *top) {
+        if ([top respondsToSelector:@selector(backSwipeWillPop)]) [(id<TBFullWidth>)top backSwipeWillPop];
+    };
+    _backSwipe.finished = ^(BOOL popped) {
+        TBShell *s = w;
+        [s.view setNeedsLayout];
+        [s.view layoutIfNeeded];
+    };
+}
+
 - (void)viewWillLayoutSubviews {
     [super viewWillLayoutSubviews];
     CGRect b = self.view.bounds;
+    if (_backSwipe.active) { /* the top screen has a transform: no frames now; a turn of the iPad ends the swipe */
+        if (CGSizeEqualToSize(b.size, _swipeSize)) return;
+        [_backSwipe abort];
+    }
     BOOL land = b.size.width > b.size.height, full = [self topWantsFullWidth];
     _guideHeader.frame = CGRectMake(0, 0, 256, 44);
     _guide.frame = CGRectMake(0, 44, 256, b.size.height - 44);
@@ -177,10 +215,18 @@ static __weak TBShell *g_shell;
     [_left setImage:back ? [TBStyle icon:@"back" size:24 color:TBHex(0xAFAFAF)] : [TBStyle icon:@"menu" size:25 color:TBHex(0x363636)] forState:UIControlStateNormal];
     _left.hidden = !back && land && ![self topWantsFullWidth]; /* the guide is open: no menu button */
     _title.text = _nav.topViewController.title;
-    /* owner 2026-11-12: a long title must end with "..." before the search field, not run under it */
-    CGFloat tx = _left.hidden ? 14 : 56;
+    UIViewController *top = _nav.topViewController;
+    if (_extraOwner != top) {
+        [_extra removeFromSuperview];
+        _extra = [top respondsToSelector:@selector(headerButton)] ? [(id<TBFullWidth>)top headerButton] : nil;
+        _extraOwner = top;
+        if (_extra) [_header addSubview:_extra];
+    }
+    _extra.frame = CGRectMake(CGRectGetMinX(_searchField.frame) - 8 - 44, 0, 44, 44);
+    /* owner 2026-11-12: a long title must end with "..." before the search field (or the header button), not run under it */
+    CGFloat tx = _left.hidden ? 14 : 56, right = _extra ? CGRectGetMinX(_extra.frame) : CGRectGetMinX(_searchField.frame);
     _title.lineBreakMode = NSLineBreakByTruncatingTail;
-    _title.frame = CGRectMake(tx, 0, MAX(0, CGRectGetMinX(_searchField.frame) - 12 - tx), 44);
+    _title.frame = CGRectMake(tx, 0, MAX(0, right - 12 - tx), 44);
 }
 
 - (void)navigationController:(UINavigationController *)n didShowViewController:(UIViewController *)vc animated:(BOOL)a {
@@ -310,6 +356,8 @@ static __weak TBShell *g_shell;
         l.cardStyle = TBCardGrid;
     } else if ([t isEqualToString:@"Account"]) {
         vc = [TBAccountController new];
+    } else if ([t isEqualToString:@"Shorts"]) {
+        vc = [TBShortsController new];
     } else {
         NSString *bid = [t isEqualToString:@"Watch Later"] ? @"VLWL" : [t isEqualToString:@"Liked Videos"] ? @"VLLL"
                       : [t isEqualToString:@"Playlists"] ? @"FEplaylist_aggregation" : @"FEhistory";

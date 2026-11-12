@@ -1,5 +1,6 @@
 /* Real YouTube over the network (no account). These tests depend on YouTube's servers on the day they run. */
 #include <stdlib.h>
+#include <string.h>
 #include "tb_hls.h"
 #include "tb_http.h"
 #include "tb_stream.h"
@@ -236,4 +237,25 @@ TB_TEST(test_channel_tabs, "AC-CHANNEL-2") {
         CHECK_INT(l.items[0].kind, kinds[t]);
         tb_list_free(&l);
     }
+}
+
+TB_TEST(test_shorts_feed_live, "BR-SHORTS-FEED") {
+    CHECK(ready());
+    tb_list a;
+    CHECK_INT(tb_yt_shorts(NULL, &a), 0);          /* seed + first page (D53) */
+    CHECK(a.n >= 5);
+    CHECK(a.continuation && a.continuation[0]);
+    for (int i = 0; i < a.n; i++) CHECK(a.items[i].id && strlen(a.items[i].id) == 11);
+    tb_list b;
+    CHECK_INT(tb_yt_shorts(a.continuation, &b), 0);
+    CHECK(b.n >= 4);
+    tb_player p;                                    /* a Short plays like any video: H.264 + AAC */
+    CHECK_INT(tb_yt_player(a.items[0].id, &p), 0);
+    CHECK_STR(p.status, "OK");
+    int avc = 0;
+    for (int i = 0; i < p.nf; i++) if (p.f[i].mime && strstr(p.f[i].mime, "avc1") && p.f[i].height >= 640) avc++;
+    CHECK(avc > 0);
+    tb_player_free(&p);
+    tb_list_free(&a);
+    tb_list_free(&b);
 }

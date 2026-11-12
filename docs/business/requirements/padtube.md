@@ -153,7 +153,7 @@ From [PLAN §4](../../../local/PLAN.md) and [research-efficiency §9](../../rese
 | 1080p | Cut | Panel is 1024x768. 3.1x the remux bytes of 720p. |
 | VP9, AV1, Opus | Cut | No hardware decode on the A5. |
 | JS solve at play time | Cut | 211 MB peak on a Mac; crash point 275–297 MB. |
-| Shorts swipe feed | Cut | Needs 2+ players. Shorts play as normal videos. |
+| Shorts swipe feed | Built (owner request 2026-11-13, D53-D60) | Shorts tab: vertical swipe feed, two AVPlayers, reload button; `docs/design/shorts.md` |
 | Animated previews | Cut | WebP or video; no WebP on iOS 6. |
 | Inline autoplay in lists | Cut | One player only; remux would run during scroll. |
 | Live chat | Cut | Constant poll keeps the radio on. |

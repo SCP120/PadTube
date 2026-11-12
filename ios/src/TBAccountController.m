@@ -114,7 +114,8 @@ static UIButton *lightButton(NSString *title, id target, SEL action) {
         _heading.text = @"Sign in with a code";
         _body.text = @"On your phone or computer, open this address and type the code. You do not type a password on the iPad.";
         _address.text = @"google.com/device";
-        _status.text = @"Waiting for you to enter the code. This page changes by itself when you are signed in.";
+        _status.text = self.notice.length ? [self.notice stringByAppendingString:@" This page changes by itself when you are signed in."]
+                                          : @"Waiting for you to enter the code. This page changes by itself when you are signed in.";
         [_action setTitle:@"Cancel" forState:UIControlStateNormal];
         [_spin startAnimating];
         _qr.image = qrImage(_url ?: @"https://www.google.com/device", 200);
@@ -179,7 +180,7 @@ static UIButton *lightButton(NSString *title, id target, SEL action) {
         self->_waiting = YES;
         self->_code.text = code;
         self->_url = url;
-        self->_error = nil;
+        self->_error = self.notice;
         [self refresh];
     } done:^(BOOL ok, NSString *err) {
         self->_waiting = NO;

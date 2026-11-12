@@ -35,4 +35,6 @@
 - (void)togglePlay;
 - (NSString *)currentCaption;
 - (NSArray *)availableHeights;
+- (int)doubleTapAt:(CGPoint)p;          /* the double tap handler: -10, +10 or 0 s skipped (D51) */
+- (BOOL)swipedDown;                     /* the swipe-down handler: leaves full screen (D50) */
 @end

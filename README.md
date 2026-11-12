@@ -27,6 +27,9 @@
 | Sign in (optional) | With a short code: PadTube shows the code, you enter it at google.com/device on another device. No password and no web page on the iPad. Then Home, Subscriptions, History, Watch Later, Liked Videos and Playlists show your account |
 | Look | The iPad style of 2012: dark header, guide on the left, card grid. Light and Dark theme |
 | Links | YouTube links open in PadTube; other links open in Safari |
+| Shorts | A vertical swipe feed with the next Short ready before the swipe ends; like, comments, subscribe, share; reload |
+| Signed-in playback | When YouTube asks to confirm you are not a bot, PadTube plays through your account: it runs YouTube's player challenge in iOS 6's own JavaScriptCore (prepared once per YouTube player version, about 4 s on an iPad mini 1) |
+| Gestures | Swipe from the left edge to go back; in full screen, swipe down to leave it; double tap the left or right side of the video for -10 / +10 s; swipe across the area under the tabs to change the tab |
 
 Not in this version: uploads, downloads, a comment box, playback speed, iPhone layout.
 

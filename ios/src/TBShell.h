@@ -7,7 +7,11 @@
 @protocol TBFullWidth <NSObject>
 @optional
 - (BOOL)wantsFullWidth;    /* the watch page: header and content over the whole width, guide closed */
+- (void)backSwipeWillPop;  /* a swipe back will pop this screen: stop slow work now, under the slide (D49) */
+- (UIButton *)headerButton;  /* one 44 pt button in the header, left of the search field (Shorts: reload) */
 @end
+
+@class TBBackSwipe;
 
 @interface TBShell : UIViewController
 + (TBShell *)shared;
@@ -20,5 +24,6 @@
 - (void)search:(NSString *)q;
 - (void)toggleGuide;
 - (void)refreshAccount;                                      /* sign-in state changed */
+@property (nonatomic, readonly) TBBackSwipe *backSwipe;             /* swipe back from the left edge (D49) */
 - (CGRect)titleFrame;                                         /* header title, for the self-test */
 @end

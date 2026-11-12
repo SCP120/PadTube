@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include "tb_http.h"
 #include "tb_live.h"
@@ -17,6 +18,10 @@ static int g_port = -1, g_gen;
 static tb_stream *g_stream;
 static tb_live *g_live;
 static int g_order[8], g_norder;
+/* extra streams (tb_hls_add): their own generation numbers, far from g_gen so the two never meet */
+static struct { int gen; tb_stream *s; int limit, served; } g_extra[TB_HLS_EXTRA];
+static pthread_cond_t g_gate = PTHREAD_COND_INITIALIZER;   /* a limit rose or a stream was removed */
+static int g_xgen = 1000000;
 static tb_hls_stats g_st;
 /* Request log for the device tests: what the iOS player asks for, and when (ms after tb_hls_set). */
 #define LOG_N 64
@@ -69,6 +74,7 @@ static void reply(int fd, int code, const char *type, const void *body, size_t n
 static tb_stream *acquire(int gen) {
     pthread_mutex_lock(&g_mu);
     tb_stream *s = gen == g_gen ? g_stream : NULL;
+    for (int i = 0; !s && i < TB_HLS_EXTRA; i++) if (g_extra[i].s && g_extra[i].gen == gen) s = g_extra[i].s;
     if (s) tb_stream_retain(s);
     pthread_mutex_unlock(&g_mu);
     return s;
@@ -122,11 +128,31 @@ static void serve(int fd, const char *path, int head_only) {
         log_req(path, t0, (long)strlen(pl), 200);
         free(pl);
     } else if (sscanf(tail, "%d/%d.ts", &vi, &seg) == 2) {
+        int open = 1, slot = -1;   /* preload gate: wait while seg is above the stream's limit */
+        pthread_mutex_lock(&g_mu);
+        for (;;) {
+            slot = -1;
+            for (int i = 0; i < TB_HLS_EXTRA; i++) if (g_extra[i].s == s && g_extra[i].gen == gen) slot = i;
+            if (slot < 0 || g_extra[slot].limit < 0 || seg <= g_extra[slot].limit) break;
+            struct timespec ts;
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            ts.tv_sec = tv.tv_sec + 1;
+            ts.tv_nsec = tv.tv_usec * 1000;
+            pthread_cond_timedwait(&g_gate, &g_mu, &ts);   /* rechecked at least once a second */
+        }
+        if (slot < 0 && gen != g_gen) open = 0;   /* removed while waiting */
+        int lim = slot >= 0 ? g_extra[slot].limit : -1;
+        pthread_mutex_unlock(&g_mu);
+        if (!open) { tb_stream_release(s); reply(fd, 404, "text/plain", "", 0, 0); return; }
         tb_out o = {0};
         err = tb_stream_segment(s, vi, seg, &o);
         if (!err) {
             reply(fd, 200, "video/mp2t", o.p, o.len, head_only);
-            tb_stream_prefetch(s, vi, seg + 1);
+            if (lim < 0 || seg + 1 <= lim) tb_stream_prefetch(s, vi, seg + 1);   /* not past the gate */
+            pthread_mutex_lock(&g_mu);
+            if (slot >= 0 && g_extra[slot].s == s && seg > g_extra[slot].served) g_extra[slot].served = seg;
+            pthread_mutex_unlock(&g_mu);
         }
         log_req(path, t0, (long)o.len, err ? err : 200);
         tb_out_free(&o);
@@ -267,6 +293,54 @@ void tb_hls_url(int vi, int master, char *out, size_t cap) {
     if (master == 2) snprintf(out, cap, "http://127.0.0.1:%d/%d/live.m3u8", g_port, g_gen);
     else if (master) snprintf(out, cap, "http://127.0.0.1:%d/%d/master.m3u8", g_port, g_gen);
     else snprintf(out, cap, "http://127.0.0.1:%d/%d/%d.m3u8", g_port, g_gen, vi);
+    pthread_mutex_unlock(&g_mu);
+}
+
+int tb_hls_add(tb_stream *s) {
+    int gen = -1;
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < TB_HLS_EXTRA && s; i++)
+        if (!g_extra[i].s) {
+            tb_stream_retain(s);
+            g_extra[i].s = s;
+            g_extra[i].limit = TB_HLS_OPEN;
+            g_extra[i].served = -1;
+            gen = g_extra[i].gen = ++g_xgen;
+            break;
+        }
+    pthread_mutex_unlock(&g_mu);
+    return gen;
+}
+
+void tb_hls_remove(int gen) {
+    tb_stream *s = NULL;
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < TB_HLS_EXTRA; i++)
+        if (g_extra[i].s && g_extra[i].gen == gen) { s = g_extra[i].s; g_extra[i].s = NULL; break; }
+    pthread_cond_broadcast(&g_gate);
+    pthread_mutex_unlock(&g_mu);
+    if (s) { tb_stream_cancel(s); tb_stream_release(s); }   /* a request being served keeps its own reference */
+}
+
+void tb_hls_limit(int gen, int max_seg) {
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < TB_HLS_EXTRA; i++)
+        if (g_extra[i].s && g_extra[i].gen == gen) g_extra[i].limit = max_seg == TB_HLS_FREEZE ? (g_extra[i].served < 0 ? 0 : g_extra[i].served) : max_seg;
+    pthread_cond_broadcast(&g_gate);
+    pthread_mutex_unlock(&g_mu);
+}
+
+int tb_hls_served_max(int gen) {
+    int r = -1;
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < TB_HLS_EXTRA; i++) if (g_extra[i].s && g_extra[i].gen == gen) r = g_extra[i].served;
+    pthread_mutex_unlock(&g_mu);
+    return r;
+}
+
+void tb_hls_url_gen(int gen, int vi, char *out, size_t cap) {
+    pthread_mutex_lock(&g_mu);
+    snprintf(out, cap, "http://127.0.0.1:%d/%d/%d.m3u8", g_port, gen, vi);
     pthread_mutex_unlock(&g_mu);
 }
 

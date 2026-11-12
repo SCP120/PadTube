@@ -218,6 +218,7 @@ static void placeBadge(UILabel *b, NSString *text, CGRect thumb, CGFloat inset, 
     UILabel *_title, *_byline, *_meta, *_badge;
     id _token;
     NSString *_url;
+    CGSize _px;                 /* pixel size of the thumbnail asked for */
 }
 - (id)initWithFrame:(CGRect)f {
     if (!(self = [super initWithFrame:f])) return nil;
@@ -266,6 +267,25 @@ static void placeBadge(UILabel *b, NSString *text, CGRect thumb, CGFloat inset, 
     _plPanel.frame = CGRectMake(w - 1 - pw, 0, pw, th);
     _plIcon.frame = CGRectMake(0, floor(th / 2) - 30, pw, 30);
     _plCount.frame = CGRectMake(2, floor(th / 2) + 2, pw - 4, 34);
+    /* a new width (a cell made at 320 pt, a turn of the iPad): the thumbnail again at the new size. Owner bug
+     * 2026-11-13: tiles asked for 91 px images at launch and showed them scaled up to 240 px (MEASURED) */
+    if (_item && !CGSizeEqualToSize(_px, [self thumbPixels])) [self loadThumb];
+}
+- (CGSize)thumbPixels {
+    CGFloat w = self.bounds.size.width;
+    return CGSizeMake(floor(w - 2), floor(w * 9 / 16));
+}
+- (void)loadThumb {
+    [TBImageLoader cancel:_token];
+    _token = nil;
+    _px = [self thumbPixels];
+    if (_px.width < 1) return;
+    __weak TBTile *wself = self;
+    NSString *u = _url;
+    _token = [TBImageLoader load:u pixelSize:_px done:^(UIImage *img) {
+        TBTile *t = wself;   /* the old image stays until the new one is there */
+        if (t && [t->_url isEqualToString:u] && img) { t->_thumb.image = img; t->_token = nil; }
+    }];
 }
 - (void)setItem:(TBItem *)it {
     _item = it;
@@ -300,13 +320,7 @@ static void placeBadge(UILabel *b, NSString *text, CGRect thumb, CGFloat inset, 
     }
     [self setNeedsLayout];
     _url = it.thumb;
-    __weak TBTile *wself = self;
-    NSString *u = it.thumb;
-    CGFloat w = self.bounds.size.width;
-    _token = [TBImageLoader load:u pixelSize:CGSizeMake(floor(w - 2), floor(w * 9 / 16)) done:^(UIImage *img) {
-        TBTile *t = wself;
-        if (t && [t->_url isEqualToString:u]) { t->_thumb.image = img; t->_token = nil; }
-    }];
+    [self loadThumb];
 }
 @end
 

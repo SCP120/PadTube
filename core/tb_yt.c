@@ -1,4 +1,5 @@
 #include "tb_yt.h"
+#include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,9 @@
 #define API "https://www.youtube.com/youtubei/v1/"
 #define VISIONOS_UA "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
 #define TV_UA "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version"
+/* yt-dlp 2026.10.21 tv_samsung (its default client): the TV client that still gives formats (D63/D64) */
+#define TVS_VERSION "5.20260707"
+#define TVS_UA "Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/2.4.0 TV Safari/538.1"
 
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static char g_visitor[256];
@@ -68,7 +72,7 @@ static void url_escape(sb *b, const char *s) {
     }
 }
 
-enum { CL_MWEB, CL_VISIONOS, CL_TV };
+enum { CL_MWEB, CL_VISIONOS, CL_TV, CL_TVS };
 
 static void context(sb *b, int client) {
     pthread_mutex_lock(&g_mu);
@@ -80,6 +84,9 @@ static void context(sb *b, int client) {
     else if (client == CL_VISIONOS)
         sb_str(b, "\"clientName\":\"VISIONOS\",\"clientVersion\":\"" VISIONOS_VERSION "\",\"deviceMake\":\"Apple\","
                   "\"deviceModel\":\"RealityDevice17,1\",\"osName\":\"visionOS\",\"osVersion\":\"26.5.23O471\"");
+    else if (client == CL_TVS)
+        sb_str(b, "\"clientName\":\"TVHTML5\",\"clientVersion\":\"" TVS_VERSION "\",\"deviceMake\":\"Samsung\",\"deviceModel\":\"UKS9800\","
+                  "\"osName\":\"Tizen\",\"osVersion\":\"2.4.0\"");
     else sb_str(b, "\"clientName\":\"TVHTML5\",\"clientVersion\":\"" TV_VERSION "\",\"platform\":\"TV\"");
     sb_str(b, ",\"hl\":\"en\",\"gl\":\"US\"");
     if (vis[0]) { sb_str(b, ",\"visitorData\":"); sb_json(b, vis); }
@@ -100,8 +107,9 @@ static int call(int client, const char *endpoint, const char *body_tail, const c
     sb_str(&hdr, "Content-Type: application/json\r\n");
     if (g_visitor[0]) { sb_str(&hdr, "X-Goog-Visitor-Id: "); sb_str(&hdr, g_visitor); sb_str(&hdr, "\r\n"); }
     if (client == CL_VISIONOS) sb_str(&hdr, "User-Agent: " VISIONOS_UA "\r\nX-YouTube-Client-Name: 101\r\nX-YouTube-Client-Version: " VISIONOS_VERSION "\r\n");
-    else if (client == CL_TV) {
-        sb_str(&hdr, "User-Agent: " TV_UA "\r\nX-YouTube-Client-Name: 7\r\nX-YouTube-Client-Version: " TV_VERSION "\r\n");
+    else if (client == CL_TV || client == CL_TVS) {
+        if (client == CL_TV) sb_str(&hdr, "User-Agent: " TV_UA "\r\nX-YouTube-Client-Name: 7\r\nX-YouTube-Client-Version: " TV_VERSION "\r\n");
+        else sb_str(&hdr, "User-Agent: " TVS_UA "\r\nX-YouTube-Client-Name: 7\r\nX-YouTube-Client-Version: " TVS_VERSION "\r\nOrigin: https://www.youtube.com\r\n");
         if (g_token[0]) { sb_str(&hdr, "Authorization: Bearer "); sb_str(&hdr, g_token); sb_str(&hdr, "\r\n"); }
     } else sb_str(&hdr, "X-YouTube-Client-Name: 2\r\nX-YouTube-Client-Version: " MWEB_VERSION "\r\n");
     pthread_mutex_unlock(&g_mu);
@@ -433,6 +441,80 @@ static int list_call(int client, const char *ep, const char *tail, const char *m
     return 0;
 }
 
+/* ---------- Shorts (D53, docs/design/shorts.md §1) ---------- */
+
+#define MASK_SHORTS_SEED "replacementEndpoint(reelWatchEndpoint(videoId,thumbnail)),sequenceContinuation"
+#define MASK_SHORTS_SEQ "entries(command(reelWatchEndpoint(videoId,thumbnail))),continuationEndpoint(continuationCommand(token))"
+
+static void shorts_item(tb_list *l, const char *id) {
+    if (!id || strlen(id) != 11) return;
+    for (int i = 0; i < l->n; i++) if (!strcmp(l->items[i].id, id)) return;   /* the seed comes again in the sequence */
+    tb_item it = {0};
+    it.kind = TB_KIND_VIDEO;
+    it.id = strdup(id);
+    char b[80];
+    snprintf(b, sizeof b, "https://i.ytimg.com/vi/%s/frame0.jpg", id);   /* the first frame (D55) */
+    it.thumb = strdup(b);
+    list_add(l, &it);
+}
+
+int tb_yt_parse_shorts_seed(const char *json, size_t len, char **video_id, char **sequence) {
+    *video_id = *sequence = NULL;
+    yyjson_doc *d = yyjson_read(json, len, 0);
+    if (!d) return -1;
+    yyjson_val *root = yyjson_doc_get_root(d);
+    const char *v = tbj_str(root, "replacementEndpoint", "reelWatchEndpoint", "videoId", NULL);
+    const char *s = tbj_str(root, "sequenceContinuation", NULL);
+    if (v) *video_id = strdup(v);
+    if (s) *sequence = strdup(s);
+    yyjson_doc_free(d);
+    return s ? 0 : -1;
+}
+
+int tb_yt_parse_shorts(const char *json, size_t len, tb_list *out) {
+    yyjson_doc *d = yyjson_read(json, len, 0);
+    if (!d) return -1;
+    yyjson_val *root = yyjson_doc_get_root(d), *e;
+    size_t i, max;
+    yyjson_arr_foreach(tbj_get(root, "entries", NULL), i, max, e)
+        shorts_item(out, tbj_str(e, "command", "reelWatchEndpoint", "videoId", NULL));
+    const char *t = tbj_str(root, "continuationEndpoint", "continuationCommand", "token", NULL);
+    if (t) { free(out->continuation); out->continuation = strdup(t); }
+    yyjson_doc_free(d);
+    return 0;
+}
+
+int tb_yt_shorts(const char *continuation, tb_list *out) {
+    memset(out, 0, sizeof *out);
+    tb_resp r;
+    sb t = {0};
+    char *seed = NULL, *seq = NULL;
+    if (!continuation) {
+        int st = call(CL_MWEB, "reel/reel_item_watch",
+                      ",\"params\":\"CAw%3D\",\"inputType\":\"REEL_WATCH_INPUT_TYPE_SEEDLESS\",\"disablePlayerResponse\":true", MASK_SHORTS_SEED, &r);
+        if (st != 200 || tb_yt_parse_shorts_seed(r.body, r.len, &seed, &seq) != 0) {
+            out->error = strdup(st == 200 ? "no Shorts sequence" : st < 0 ? tb_http_strerror(st) : "server error");
+            tb_resp_free(&r);
+            return st == 200 ? -1 : st < 0 ? st : -st;
+        }
+        tb_resp_free(&r);
+        shorts_item(out, seed);
+        sb_str(&t, ",\"sequenceParams\":");
+        sb_json(&t, seq);
+    } else {
+        sb_str(&t, ",\"continuation\":");
+        sb_json(&t, continuation);
+    }
+    int st = call(CL_MWEB, "reel/reel_watch_sequence", t.p, MASK_SHORTS_SEQ, &r);
+    free(t.p);
+    free(seed);
+    free(seq);
+    if (st == 200) tb_yt_parse_shorts(r.body, r.len, out);
+    else if (!out->n) out->error = strdup(st < 0 ? tb_http_strerror(st) : "server error");
+    tb_resp_free(&r);
+    return out->n ? 0 : st == 200 ? -1 : st < 0 ? st : -st;
+}
+
 int tb_yt_search(const char *query, const char *continuation, const char *params, tb_list *out) {
     sb t = {0};
     if (continuation) { sb_str(&t, ",\"continuation\":"); sb_json(&t, continuation); }
@@ -465,11 +547,26 @@ int tb_yt_parse_player(const char *json, size_t len, tb_player *p) {
     yyjson_val *f;
     p->f = calloc(yyjson_arr_size(af) + 1, sizeof *p->f);
     yyjson_arr_foreach(af, i, max, f) {
-        const char *url = tbj_str(f, "url", NULL), *mime = tbj_str(f, "mimeType", NULL);
-        if (!url || !mime) continue; /* signatureCipher formats need JS: not used */
+        const char *url = tbj_str(f, "url", NULL), *mime = tbj_str(f, "mimeType", NULL), *cipher = tbj_str(f, "signatureCipher", NULL);
+        char *curl = NULL, *cs = NULL, *csp = NULL;
+        if (!url && cipher) {   /* TV client: url, s, sp in a query string (D64) */
+            sb q = {0};
+            sb_str(&q, "?");
+            sb_str(&q, cipher);
+            curl = tb_url_param(q.p, "url");
+            cs = tb_url_param(q.p, "s");
+            csp = tb_url_param(q.p, "sp");
+            free(q.p);
+            if (!curl || !cs) { free(curl); free(cs); free(csp); continue; }
+            url = curl;
+        }
+        if (!url || !mime) continue;
         tb_format *o = &p->f[p->nf++];
         o->itag = (int)tbj_int(f, "itag", NULL);
-        o->url = strdup(url);
+        o->url = curl ? curl : strdup(url);
+        o->sig_s = cs;
+        o->sig_sp = cs ? (csp ? csp : strdup("signature")) : NULL;
+        if (!cs) free(csp);
         o->mime = strdup(mime);
         o->width = (int)tbj_int(f, "width", NULL);
         o->height = (int)tbj_int(f, "height", NULL);
@@ -509,7 +606,187 @@ int tb_yt_parse_player(const char *json, size_t len, tb_player *p) {
     return 0;
 }
 
-int tb_yt_player(const char *video_id, tb_player *out) {
+static tb_yt_counts g_counts;
+static double g_last_reset = -1e18;
+
+int tb_yt_visitor_reset_allowed(double now_ms, double *last_ms) {
+    if (now_ms - *last_ms < TB_VISITOR_RESET_MIN_MS) return 0;
+    *last_ms = now_ms;
+    return 1;
+}
+
+void tb_yt_get_counts(tb_yt_counts *out) {
+    pthread_mutex_lock(&g_mu);
+    *out = g_counts;
+    pthread_mutex_unlock(&g_mu);
+}
+
+int tb_yt_player(const char *video_id, tb_player *out) { return tb_yt_player_opt(video_id, 1, out); }
+
+static int hexv(char c) { return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1; }
+
+char *tb_url_param(const char *url, const char *key) {
+    const char *q = url ? strchr(url, '?') : NULL;
+    size_t kl = strlen(key);
+    while (q) {
+        q++;
+        if (!strncmp(q, key, kl) && q[kl] == '=') {
+            const char *v = q + kl + 1, *e = strchr(v, '&');
+            size_t n = e ? (size_t)(e - v) : strlen(v);
+            char *o = malloc(n + 1), *w = o;
+            for (size_t i = 0; i < n; i++) {
+                if (v[i] == '%' && i + 2 < n + 1 && hexv(v[i + 1]) >= 0 && hexv(v[i + 2]) >= 0) { *w++ = (char)(hexv(v[i + 1]) * 16 + hexv(v[i + 2])); i += 2; }
+                else *w++ = v[i] == '+' ? ' ' : v[i];
+            }
+            *w = 0;
+            return o;
+        }
+        q = strchr(q, '&');
+    }
+    return NULL;
+}
+
+char *tb_url_solved(const char *url, const char *n_solved, const char *sp, const char *sig) {
+    sb o = {0};
+    const char *n = strstr(url, "&n="), *start;
+    if (!n) n = strstr(url, "?n=");
+    if (n && n_solved) {
+        start = n + 3;
+        const char *e = strchr(start, '&');
+        sb_add(&o, url, (size_t)(start - url));
+        url_escape(&o, n_solved);
+        sb_str(&o, e ? e : "");
+    } else sb_str(&o, url);
+    if (sp && sig) {
+        sb_str(&o, strchr(o.p, '?') ? "&" : "?");
+        sb_str(&o, sp);
+        sb_str(&o, "=");
+        url_escape(&o, sig);
+    }
+    return o.p;
+}
+
+int tb_js_signature_timestamp(const char *src, size_t len) {
+    static const char *keys[] = {"signatureTimestamp:", "sts:"};
+    for (int k = 0; k < 2; k++) {
+        size_t kl = strlen(keys[k]);
+        for (size_t i = 0; i + kl + 5 < len; i++) {
+            if (memcmp(src + i, keys[k], kl)) continue;
+            if (k == 1 && i && (isalnum((unsigned char)src[i - 1]) || src[i - 1] == '_' || src[i - 1] == '$')) continue;
+            int v = 0, d = 0;
+            for (size_t j = i + kl; j < len && src[j] >= '0' && src[j] <= '9' && d < 7; j++, d++) v = v * 10 + (src[j] - '0');
+            if (d == 5) return v;   /* a 5-digit day count (20769 in 2026) */
+        }
+    }
+    return 0;
+}
+
+int tb_yt_player_version(char out[16]) {
+    out[0] = 0;
+    tb_req q = {.url = "https://www.youtube.com/iframe_api", .range_start = -1, .timeout_ms = 15000};
+    tb_resp r;
+    int st = tb_http(&q, &r);
+    if (st == 200 && r.body) {
+        const char *p = strstr(r.body, "player\\/");   /* "player\/<8 hex>\/" */
+        if (p) {
+            p += 8;
+            int i = 0;
+            while (i < 8 && hexv(p[i]) >= 0) i++;
+            if (i == 8) { memcpy(out, p, 8); out[8] = 0; }
+        }
+    }
+    tb_resp_free(&r);
+    return out[0] ? 0 : (st < 0 ? st : -1);
+}
+
+#define MASK_PLAYER_TV "playabilityStatus(status,reason),streamingData(expiresInSeconds,hlsManifestUrl,adaptiveFormats(itag,url,signatureCipher,mimeType,bitrate,width,height,fps,initRange,indexRange,contentLength,audioTrack)),captions(playerCaptionsTracklistRenderer(captionTracks(baseUrl,name,languageCode,kind))),videoDetails(title,author,channelId,lengthSeconds,isLive,viewCount,shortDescription),storyboards"
+
+int tb_yt_player_tv(const char *video_id, int sts, tb_player *out) {
+    sb t = {0};
+    sb_str(&t, ",\"videoId\":");
+    sb_json(&t, video_id);
+    char tail[160];
+    snprintf(tail, sizeof tail, ",\"contentCheckOk\":true,\"racyCheckOk\":true,\"playbackContext\":{\"contentPlaybackContext\":"
+             "{\"html5Preference\":\"HTML5_PREF_WANTS\",\"signatureTimestamp\":%d}}", sts);
+    sb_str(&t, tail);
+    tb_resp r;
+    pthread_mutex_lock(&g_mu);
+    g_counts.player_calls++;
+    pthread_mutex_unlock(&g_mu);
+    int st = call(CL_TVS, "player", t.p, MASK_PLAYER_TV, &r);
+    free(t.p);
+    if (st != 200) { tb_resp_free(&r); memset(out, 0, sizeof *out); return st < 0 ? st : -st; }
+    int rc = tb_yt_parse_player(r.body, r.len, out);
+    tb_resp_free(&r);
+    return rc;
+}
+
+int tb_yt_probe_player(const char *client, const char *video_id, int with_token, tb_yt_probe *out) {
+    static const struct { const char *name, *ver, *num, *ua, *extra; } cl[] = {
+        {"VISIONOS", VISIONOS_VERSION, "101", VISIONOS_UA, ",\"deviceMake\":\"Apple\",\"deviceModel\":\"RealityDevice17,1\",\"osName\":\"visionOS\",\"osVersion\":\"26.5.23O471\""},
+        {"IOS", "21.26.4", "5", "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+         ",\"deviceMake\":\"Apple\",\"deviceModel\":\"iPhone16,2\",\"osName\":\"iPhone\",\"osVersion\":\"18.3.2.22D82\""},
+        {"TVHTML5", TV_VERSION, "7", TV_UA, ",\"platform\":\"TV\""},
+        {"TVHTML5_SIMPLY_EMBEDDED_PLAYER", "2.0", "85", TV_UA, ""},
+    };
+    memset(out, 0, sizeof *out);
+    int k = -1;
+    for (int i = 0; i < (int)(sizeof cl / sizeof *cl); i++) if (!strcmp(cl[i].name, client)) k = i;
+    if (k < 0) return -1;
+    char vis[256], tok[2048];
+    pthread_mutex_lock(&g_mu);
+    snprintf(vis, sizeof vis, "%s", g_visitor);
+    snprintf(tok, sizeof tok, "%s", g_token);
+    pthread_mutex_unlock(&g_mu);
+    sb body = {0}, hdr = {0};
+    sb_str(&body, "{\"context\":{\"client\":{\"clientName\":\"");
+    sb_str(&body, cl[k].name);
+    sb_str(&body, "\",\"clientVersion\":\"");
+    sb_str(&body, cl[k].ver);
+    sb_str(&body, "\"");
+    sb_str(&body, cl[k].extra);
+    sb_str(&body, ",\"hl\":\"en\",\"gl\":\"US\"");
+    if (vis[0]) { sb_str(&body, ",\"visitorData\":"); sb_json(&body, vis); }
+    if (!strcmp(client, "TVHTML5_SIMPLY_EMBEDDED_PLAYER"))
+        sb_str(&body, "},\"thirdParty\":{\"embedUrl\":\"https://www.youtube.com/\"");
+    sb_str(&body, "}},\"videoId\":");
+    sb_json(&body, video_id);
+    sb_str(&body, ",\"contentCheckOk\":true,\"racyCheckOk\":true}");
+    sb_str(&hdr, "Content-Type: application/json\r\nUser-Agent: ");
+    sb_str(&hdr, cl[k].ua);
+    sb_str(&hdr, "\r\nX-YouTube-Client-Name: ");
+    sb_str(&hdr, cl[k].num);
+    sb_str(&hdr, "\r\nX-YouTube-Client-Version: ");
+    sb_str(&hdr, cl[k].ver);
+    sb_str(&hdr, "\r\n");
+    if (vis[0]) { sb_str(&hdr, "X-Goog-Visitor-Id: "); sb_str(&hdr, vis); sb_str(&hdr, "\r\n"); }
+    if (with_token && tok[0]) { sb_str(&hdr, "Authorization: Bearer "); sb_str(&hdr, tok); sb_str(&hdr, "\r\n"); }
+    tb_req q = {.method = "POST", .url = API "player?prettyPrint=false", .headers = hdr.p, .body = body.p, .body_len = body.len, .range_start = -1};
+    tb_resp r;
+    out->http = tb_http(&q, &r);
+    free(body.p);
+    free(hdr.p);
+    if (out->http == 200) {
+        yyjson_doc *d = yyjson_read(r.body, r.len, 0);
+        yyjson_val *root = yyjson_doc_get_root(d), *f;
+        snprintf(out->status, sizeof out->status, "%s", tbj_str(root, "playabilityStatus", "status", NULL) ?: "");
+        snprintf(out->reason, sizeof out->reason, "%s", tbj_str(root, "playabilityStatus", "reason", NULL) ?: "");
+        out->hls = tbj_str(root, "streamingData", "hlsManifestUrl", NULL) != NULL;
+        size_t i, max;
+        yyjson_arr_foreach(tbj_get(root, "streamingData", "adaptiveFormats", NULL), i, max, f) {
+            out->formats++;
+            const char *m = tbj_str(f, "mimeType", NULL), *u = tbj_str(f, "url", NULL);
+            if (m && strstr(m, "avc1")) out->avc++;
+            if (u) { out->direct++; if (strstr(u, "&n=")) out->n_param++; }
+            if (tbj_get(f, "signatureCipher", NULL) || tbj_get(f, "cipher", NULL)) out->ciphered++;
+        }
+        yyjson_doc_free(d);
+    }
+    tb_resp_free(&r);
+    return out->http == 200 ? 0 : -1;
+}
+
+int tb_yt_player_opt(const char *video_id, int allow_visitor_reset, tb_player *out) {
     sb t = {0};
     sb_str(&t, ",\"videoId\":");
     sb_json(&t, video_id);
@@ -517,6 +794,9 @@ int tb_yt_player(const char *video_id, tb_player *out) {
     int rc = -1;
     for (int attempt = 0; attempt < 2; attempt++) {
         tb_resp r;
+        pthread_mutex_lock(&g_mu);
+        g_counts.player_calls++;
+        pthread_mutex_unlock(&g_mu);
         int st = call(CL_VISIONOS, "player", t.p, MASK_PLAYER, &r);
         if (st != 200) { tb_resp_free(&r); memset(out, 0, sizeof *out); rc = st < 0 ? st : -st; break; }
         double t0 = tb_now_ms();
@@ -525,7 +805,13 @@ int tb_yt_player(const char *video_id, tb_player *out) {
         g_st.last_parse_ms = tb_now_ms() - t0;
         pthread_mutex_unlock(&g_mu);
         tb_resp_free(&r);
-        if (rc == 0 && attempt == 0 && out->status && !strcmp(out->status, "LOGIN_REQUIRED")) {
+        int login = rc == 0 && out->status && !strcmp(out->status, "LOGIN_REQUIRED");
+        pthread_mutex_lock(&g_mu);
+        if (login) g_counts.login_required++;
+        int reset = login && attempt == 0 && allow_visitor_reset && tb_yt_visitor_reset_allowed(tb_now_ms(), &g_last_reset);
+        if (reset) g_counts.visitor_resets++;
+        pthread_mutex_unlock(&g_mu);
+        if (reset) {
             tb_player_free(out);
             reset_visitor();
             continue;
@@ -1057,6 +1343,7 @@ void tb_list_free(tb_list *l) {
 void tb_player_free(tb_player *p) {
     for (int i = 0; i < p->nf; i++) {
         free(p->f[i].url); free(p->f[i].mime); free(p->f[i].audio_track_id); free(p->f[i].audio_track_name);
+        free(p->f[i].sig_s); free(p->f[i].sig_sp);
     }
     for (int i = 0; i < p->ncaps; i++) { free(p->caps[i].base_url); free(p->caps[i].lang); free(p->caps[i].name); }
     free(p->f); free(p->caps); free(p->status); free(p->reason); free(p->hls_url);

@@ -6,6 +6,8 @@
 #import "TBCore.h"
 #import "TBImageLoader.h"
 #import "TBShell.h"
+#import "TBAccountController.h"
+#import "TBSolver.h"
 #import "TBPlayerView.h"
 #import "TBStore.h"
 #import "TBWatchController.h"
@@ -35,6 +37,17 @@
     self.shell = [TBShell new];
     [[NSNotificationCenter defaultCenter] addObserverForName:TBAccountChanged object:nil queue:nil usingBlock:^(NSNotification *note) {
         [self.shell refreshAccount];
+        if ([TBAccount signedIn]) [TBSolver warmUp];   /* the signed-in player path needs the solver (D64) */
+    }];
+    if ([TBAccount signedIn])   /* after the first screen, at a low priority: about 4 s once per player version */
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [TBSolver warmUp]; });
+    /* owner 2026-11-13: when the session is gone, show the sign-in code at once (no silent failure) */
+    [[NSNotificationCenter defaultCenter] addObserverForName:TBAccountSessionLost object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        [self.shell selectGuideRow:(NSInteger)[[TBShell guideTitles] indexOfObject:@"Account"]];
+        TBAccountController *a = (TBAccountController *)self.shell.nav.topViewController;
+        if (![a isKindOfClass:[TBAccountController class]]) return;
+        a.notice = @"Your YouTube sign-in ended. Enter this code at google.com/device to sign in again.";
+        [a startSignIn];
     }];
     self.window.rootViewController = self.shell;
     self.window.backgroundColor = [UIColor blackColor];

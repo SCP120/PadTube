@@ -3,6 +3,9 @@
 #import <ImageIO/ImageIO.h>
 #include "tb_http.h"
 #include <pthread.h>
+#ifdef TB_SELFTEST
+#import "TBLog.h"
+#endif
 
 /* 12 MB = 54 decoded mqdefault thumbnails (research-efficiency §5, RetroTube's totalCostLimit). */
 static const NSUInteger kRamLimit = 12 * 1024 * 1024;
@@ -38,12 +41,13 @@ static NSString *hashName(NSString *s) {
     return o;
 }
 
-static UIImage *decode(NSData *data, CGSize px) {
+static UIImage *decode(NSData *data, CGSize px, int *srcWidth) {
     CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
     if (!src) return nil;
     CGImageRef raw = CGImageSourceCreateImageAtIndex(src, 0, NULL);
     CFRelease(src);
     if (!raw) return nil;
+    if (srcWidth) *srcWidth = (int)CGImageGetWidth(raw);
     size_t w = (size_t)px.width, h = (size_t)px.height;
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, w * 4, cs, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little);
@@ -67,6 +71,10 @@ static UIImage *decode(NSData *data, CGSize px) {
     if (self.cancelled) return;
     NSString *path = [g_dir stringByAppendingPathComponent:hashName(self.url)];
     NSData *data = [NSData dataWithContentsOfFile:path];
+#ifdef TB_SELFTEST
+    double t0 = tb_now_ms();
+    BOOL disk = data != nil;
+#endif
     if (!data) {
         tb_req q = {.url = self.url.UTF8String, .range_start = -1, .timeout_ms = 10000};
         tb_resp r;
@@ -77,7 +85,12 @@ static UIImage *decode(NSData *data, CGSize px) {
         tb_resp_free(&r);
     }
     if (self.cancelled) return;
-    UIImage *img = data ? decode(data, self.size) : nil;
+    int srcW = 0;
+    UIImage *img = data ? decode(data, self.size, &srcW) : nil;
+#ifdef TB_SELFTEST   /* image-load log for the thumbnail tests: what was asked, what came, from where, how long */
+    TBLog(@"PTIMG %@ px %dx%d src %d %@ %.0f ms", [self.url substringFromIndex:self.url.length > 28 ? self.url.length - 28 : 0],
+          (int)self.size.width, (int)self.size.height, srcW, disk ? @"disk" : @"net", tb_now_ms() - t0);
+#endif
     dispatch_async(dispatch_get_main_queue(), ^{
         if (img) {
             NSUInteger cost = (NSUInteger)(self.size.width * self.size.height * 4);

@@ -87,3 +87,86 @@ TB_TEST(test_parse_playlist_fixture, "AC-PLAYLIST-1") {
     CHECK_STR(l.items[0].id, "fNk_zzaMoSs");
     tb_list_free(&l);
 }
+
+/* Shorts (D53). Fixtures: tests/fixtures/yt/shorts_seed.json and shorts_sequence.json, captured 2026-11-13 with the
+ * field masks of tb_yt_shorts (MWEB, signed out; no responseContext, no IP). Expected values read from the raw JSON
+ * with a Python script, not from these parsers. */
+TB_TEST(test_parse_shorts_seed_fixture, "BR-SHORTS-FEED") {
+    size_t n; char *j = load("shorts_seed.json", &n); CHECK(j);
+    char *vid, *seq;
+    CHECK_INT(tb_yt_parse_shorts_seed(j, n, &vid, &seq), 0); free(j);
+    CHECK_STR(vid, "rx2EKhvftuY");
+    CHECK_INT((int)strlen(seq), 158);
+    free(vid); free(seq);
+}
+
+TB_TEST(test_parse_shorts_sequence_fixture, "BR-SHORTS-FEED") {
+    size_t n; char *j = load("shorts_sequence.json", &n); CHECK(j);
+    tb_list l = {0};
+    CHECK_INT(tb_yt_parse_shorts(j, n, &l), 0); free(j);
+    static const char *ids[] = {"odSKoH6S3Ug", "5XQD_fTz4fw", "t9ryFZiR4C0", "qhCCBiOH1I4", "qe3MQ1mpeSI", "huh8-I8t3Pc", "IJodwEVBSs0", "Vv5dgB7mTpA"};
+    CHECK_INT(l.n, 8);
+    for (int i = 0; i < 8; i++) { CHECK_STR(l.items[i].id, ids[i]); CHECK_INT(l.items[i].kind, TB_KIND_VIDEO); }
+    CHECK_STR(l.items[0].thumb, "https://i.ytimg.com/vi/odSKoH6S3Ug/frame0.jpg");
+    CHECK_INT((int)strlen(l.continuation), 1120);
+    CHECK(!strncmp(l.continuation, "GmYKC1Z2NWRn", 12));
+    tb_list_free(&l);
+}
+
+TB_TEST(test_visitor_reset_at_most_every_10_min, "BR-NET-VISITOR-STABLE") {
+    /* owner bug 2026-11-13 (Shorts "not a bot"): a burst of LOGIN_REQUIRED answers must not change the visitor ID
+     * again and again */
+    double last = -1e18;
+    CHECK_INT(tb_yt_visitor_reset_allowed(1000.0, &last), 1);
+    CHECK_INT(tb_yt_visitor_reset_allowed(2000.0, &last), 0);
+    CHECK_INT(tb_yt_visitor_reset_allowed(1000.0 + 599999.0, &last), 0);   /* 9 min 59.999 s later */
+    CHECK_INT(tb_yt_visitor_reset_allowed(1000.0 + 600000.0, &last), 1);   /* 10 min later */
+    CHECK_INT(tb_yt_visitor_reset_allowed(1000.0 + 600001.0, &last), 0);
+}
+
+/* D64 signed-in path: tests/fixtures/yt/player_tv_dQw4w9WgXcQ.json is a tv_samsung answer (signed out, captured
+ * 2026-11-13 with MASK_PLAYER_TV; the network's IP replaced by 0.0.0.0). Expected values read from the raw JSON with
+ * Python's urllib.parse, not from these functions. */
+TB_TEST(test_parse_player_tv_cipher_fixture, "BR-PLAY-SIGNED-IN") {
+    size_t n; char *j = load("player_tv_dQw4w9WgXcQ.json", &n); CHECK(j);
+    tb_player p; CHECK_INT(tb_yt_parse_player(j, n, &p), 0); free(j);
+    CHECK_STR(p.status, "OK");
+    CHECK_INT(p.nf, 26);
+    int ciphered = 0;
+    tb_format *f137 = NULL;
+    for (int i = 0; i < p.nf; i++) { if (p.f[i].sig_s) ciphered++; if (p.f[i].itag == 137) f137 = &p.f[i]; }
+    CHECK_INT(ciphered, 26);
+    CHECK(f137 != NULL);
+    CHECK_STR(f137->sig_sp, "sig");
+    CHECK_STR(f137->sig_s, "AE0s2JYwRQIhAPkG8c9bGgB_hTnN-cgbLM8Y-p=WsMXETaL7Cw-CuDd5AiB0XEVaGU28pwRoTVmX81ObXrH1k1BYXsBnde7uypTVqQ=XQ=5=5");
+    CHECK(!strncmp(f137->url, "https://rr5---sn-8pxuuxa-i5o66.googlevideo.com/videoplayback?", 61));
+    char *nv = tb_url_param(f137->url, "n");
+    CHECK_STR(nv, "dj-IafefaqmvkoRSc");
+    free(nv);
+    tb_player_free(&p);
+}
+
+TB_TEST(test_url_solved_and_params, "BR-PLAY-SIGNED-IN") {
+    char *u = tb_url_solved("https://h/videoplayback?expire=1&n=AAA&itag=137", "B/B", "sig", "x/y+z=");
+    CHECK_STR(u, "https://h/videoplayback?expire=1&n=B%2FB&itag=137&sig=x%2Fy%2Bz%3D");
+    free(u);
+    u = tb_url_solved("https://h/v?n=AAA", "BBB", NULL, NULL);
+    CHECK_STR(u, "https://h/v?n=BBB");
+    free(u);
+    char *v = tb_url_param("https://h/v?a=1&url=https%3A%2F%2Fx%2Fy%3Fn%3D1&s=a+b", "url");
+    CHECK_STR(v, "https://x/y?n=1");
+    free(v);
+    v = tb_url_param("https://h/v?a=1&s=a+b", "s");
+    CHECK_STR(v, "a b");
+    free(v);
+    CHECK(tb_url_param("https://h/v?a=1", "s") == NULL);
+}
+
+TB_TEST(test_js_signature_timestamp, "BR-PLAY-SIGNED-IN") {
+    const char *a = "var x={foo:1,signatureTimestamp:20769,bar:2}";
+    CHECK_INT(tb_js_signature_timestamp(a, strlen(a)), 20769);
+    const char *b = "c={sts:20760,abc:1};var masts:99999;";
+    CHECK_INT(tb_js_signature_timestamp(b, strlen(b)), 20760);
+    const char *c = "no timestamp here; sts:123";
+    CHECK_INT(tb_js_signature_timestamp(c, strlen(c)), 0);
+}

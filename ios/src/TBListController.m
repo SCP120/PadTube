@@ -172,6 +172,10 @@
         TBGridCell *g = [tv dequeueReusableCellWithIdentifier:@"g"];
         if (!g && _spareCells.count) { g = _spareCells.lastObject; [_spareCells removeLastObject]; }
         if (!g) g = [tv dequeueReusableCellWithIdentifier:@"g" forIndexPath:ip];
+        /* a new or spare cell is 320 pt wide until the table lays it out: give it the row's size first, so each tile
+         * asks for its thumbnail at the size it is shown at (owner bug 2026-11-13, blurred thumbnails at launch) */
+        g.frame = CGRectMake(0, g.frame.origin.y, tv.bounds.size.width, tv.rowHeight);
+        [g layoutIfNeeded];
         NSUInteger from = (NSUInteger)ip.row * (NSUInteger)c, n = MIN((NSUInteger)c, _items.count - from);
         [g showItems:[_items subarrayWithRange:NSMakeRange(from, n)] columns:c];
         __weak TBListController *w = self;

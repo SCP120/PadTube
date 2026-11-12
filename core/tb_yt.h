@@ -39,6 +39,7 @@ typedef struct {
     int64_t init_end, index_start, index_end, content_length;
     int audio;
     char *audio_track_id, *audio_track_name;
+    char *sig_s, *sig_sp;   /* signatureCipher (TV client): the challenge and the query key for its answer; url then has n= */
     int audio_default;
 } tb_format;
 
@@ -108,6 +109,29 @@ void tb_yt_set_dump_dir(const char *dir);
 int tb_yt_search(const char *query, const char *continuation, const char *params, tb_list *out);
 int tb_yt_suggest(const char *q, char ***out, int *n);
 int tb_yt_player(const char *video_id, tb_player *out);
+/* allow_visitor_reset 0: a LOGIN_REQUIRED ("not a bot") answer is returned as it is, the visitor ID stays (Shorts
+ * preloads). With 1 a new visitor ID is fetched once and the call repeated, at most once per
+ * TB_VISITOR_RESET_MIN_MS for the whole app (owner bug 2026-11-13: keep the visitor ID stable). */
+int tb_yt_player_opt(const char *video_id, int allow_visitor_reset, tb_player *out);
+/* The signed-in path (D64): the tv_samsung client (TVHTML5 5.20260707) with the account token and the player's
+ * signatureTimestamp; formats come with signatureCipher and n (solve with tb_jsprep + JavaScriptCore). */
+int tb_yt_player_tv(const char *video_id, int signature_timestamp, tb_player *out);
+/* The current web player version (8 hex digits) from youtube.com/iframe_api; 0 or < 0 (error). */
+int tb_yt_player_version(char out[16]);
+/* signatureTimestamp of a player script, or 0 */
+int tb_js_signature_timestamp(const char *src, size_t len);
+/* query helpers: the decoded value of key (malloc, or NULL); a stream URL with n replaced by n_solved and
+ * &<sp>=<sig, escaped> appended (sp NULL: no signature) */
+char *tb_url_param(const char *url, const char *key);
+char *tb_url_solved(const char *url, const char *n_solved, const char *sp, const char *sig);
+#define TB_VISITOR_RESET_MIN_MS (10 * 60 * 1000.0)
+int tb_yt_visitor_reset_allowed(double now_ms, double *last_ms);   /* the limiter, pure (unit test) */
+typedef struct { long player_calls, login_required, visitor_resets; } tb_yt_counts;
+/* Diagnosis (owner bug "not a bot", 2026-11-13): one player call with a named client (VISIONOS, IOS, TVHTML5,
+ * TVHTML5_SIMPLY_EMBEDDED_PLAYER), with or without the account token. Reads only. */
+typedef struct { int http; char status[32], reason[96]; int formats, avc, direct, ciphered, n_param, hls; } tb_yt_probe;
+int tb_yt_probe_player(const char *client, const char *video_id, int with_token, tb_yt_probe *out);
+void tb_yt_get_counts(tb_yt_counts *out);
 int tb_yt_next(const char *video_id, tb_next *out);
 int tb_yt_channel(const char *channel_id, const char *tab_params, const char *continuation, tb_list *out);
 int tb_yt_playlist(const char *playlist_id, const char *continuation, tb_list *out);
@@ -144,6 +168,11 @@ void tb_strv_free(char **v, int n);
 
 /* Parse helpers exposed for host tests (input: a response body). */
 int tb_yt_parse_list(const char *json, size_t len, tb_list *out);
+/* Shorts (D53): continuation NULL = the seedless first Short + the first page of the sequence, else the next page.
+ * Items are videos with a frame0.jpg cover; out->continuation is the next page's token. */
+int tb_yt_shorts(const char *continuation, tb_list *out);
+int tb_yt_parse_shorts_seed(const char *json, size_t len, char **video_id, char **sequence);
+int tb_yt_parse_shorts(const char *json, size_t len, tb_list *out);
 int tb_yt_parse_player(const char *json, size_t len, tb_player *out);
 int tb_yt_parse_next(const char *json, size_t len, tb_next *out);
 int tb_yt_parse_captions(const char *body, size_t len, tb_captions *out);

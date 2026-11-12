@@ -7,6 +7,7 @@
 #include "tb_yt.h"
 
 NSString *const TBAccountChanged = @"TBAccountChanged";
+NSString *const TBAccountSessionLost = @"TBAccountSessionLost";
 
 static NSString *g_access, *g_refresh, *g_cid, *g_secret, *g_pending;
 static double g_expires; /* unix seconds */
@@ -15,6 +16,10 @@ static BOOL g_cancel;
 @implementation TBAccount
 
 + (BOOL)signedIn { return g_refresh.length > 0; }
++ (NSDictionary *)authState {
+    double now = [[NSDate date] timeIntervalSince1970];
+    return @{@"signed_in": @(g_refresh.length > 0), @"has_access": @(g_access.length > 0), @"expires_in_s": @(g_expires - now)};
+}
 + (NSString *)pendingCode { return g_pending; }
 
 + (void)saveToken {
@@ -50,7 +55,15 @@ static BOOL g_cancel;
         g_access = TBStr(t.access_token);
         g_expires = [[NSDate date] timeIntervalSince1970] + (t.expires_in > 0 ? t.expires_in : 3600);
         [self saveToken];
-    } else TBLog(@"PadTube: token refresh failed %d %s", rc, t.error ?: "");
+    } else {
+        TBLog(@"PadTube: token refresh failed %d %s", rc, t.error ?: "");
+        if (t.error && strstr(t.error, "invalid_grant")) {   /* the session is gone (revoked, expired): no silent failure */
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self signOut];
+                [[NSNotificationCenter defaultCenter] postNotificationName:TBAccountSessionLost object:nil];
+            });
+        }
+    }
     tb_token_free(&t);
     return rc == 0;
 }

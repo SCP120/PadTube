@@ -16,7 +16,7 @@ def snap(name):
     shot(f"theme_{TAG}_{name}")
 def guide_row(title):
     return ["Home Feed", "Subscriptions", "Search", "History", "Watch Later", "Liked Videos", "Playlists",
-            "YouTube History", "Live", "Account"].index(title)
+            "YouTube History", "Shorts", "Live", "Account"].index(title)
 time.sleep(2)
 for mode, dark in [("dark", 1), ("light", 0)]:
     log(f"theme_{mode}", a.j(f"theme {dark}")); time.sleep(2)

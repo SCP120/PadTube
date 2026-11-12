@@ -36,7 +36,7 @@ static __weak TBWatchController *g_current;
 - (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)o { return UIInterfaceOrientationIsLandscape(o); }
 @end
 
-@interface TBWatchController () <TBPlayerViewDelegate, UITableViewDataSource, UITableViewDelegate, UIActionSheetDelegate, TBFullWidth>
+@interface TBWatchController () <TBPlayerViewDelegate, UITableViewDataSource, UITableViewDelegate, UIActionSheetDelegate, TBFullWidth, UIGestureRecognizerDelegate>
 @end
 
 @implementation TBWatchController {
@@ -175,7 +175,38 @@ static UILabel *paneLabel(CGFloat size, UIColor *c, int lines) {
     [_related registerClass:[TBRelatedCell class] forCellReuseIdentifier:@"r"];
     [_panel addSubview:_related];
     [v addSubview:_panel];
+    /* D52: a swipe across the area under the tab bar changes the tab */
+    for (NSNumber *d in @[@(UISwipeGestureRecognizerDirectionLeft), @(UISwipeGestureRecognizerDirectionRight)]) {
+        UISwipeGestureRecognizer *g = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swiped:)];
+        g.direction = d.unsignedIntegerValue;
+        g.delegate = self;
+        [v addGestureRecognizer:g];
+    }
     self.view = v;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)g shouldReceiveTouch:(UITouch *)t {
+    if (![g isKindOfClass:[UISwipeGestureRecognizer class]]) return YES;
+    CGPoint p = [t locationInView:self.view];
+    /* under the tab bar, left of the landscape related column, not in the left 24 pt (swipe back, D49) */
+    return !_full && p.y >= CGRectGetMaxY(_tabBar.frame) && p.x >= 24 && p.x < CGRectGetMaxX(_tabBar.frame);
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)a shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)b {
+    return [a isKindOfClass:[UISwipeGestureRecognizer class]];   /* the comment and description scrolls keep working */
+}
+
+- (void)swiped:(UISwipeGestureRecognizer *)g {
+    [self swipeTab:g.direction == UISwipeGestureRecognizerDirectionLeft ? 1 : -1];
+}
+
+- (NSString *)swipeTab:(int)dir {
+    NSInteger i = _segments.selected + dir;
+    if (i >= 0 && i < (NSInteger)_segments.titles.count) {
+        _segments.selected = i;
+        [self tabChanged:i];
+    }
+    return _segments.titles[(NSUInteger)_segments.selected];
 }
 
 - (void)viewDidLoad {
@@ -235,6 +266,11 @@ static UILabel *paneLabel(CGFloat size, UIColor *c, int lines) {
         [_player stop];
         if (_full) { [[UIApplication sharedApplication] setStatusBarHidden:NO withAnimation:UIStatusBarAnimationNone]; _full = NO; }
     }
+}
+
+- (void)backSwipeWillPop {
+    [self savePosition];
+    [_player stop];   /* viewWillDisappear stops it again at the pop: then a no-op */
 }
 
 - (void)dealloc {
@@ -399,6 +435,7 @@ static UILabel *paneLabel(CGFloat size, UIColor *c, int lines) {
 - (void)toggleFullscreen {
     if (!_full) {
         _full = YES;
+        _player.fullscreen = YES;
         _orientationBeforeFull = [UIApplication sharedApplication].statusBarOrientation;
         _fc = [TBFullController new];
         (void)_fc.view; /* load the view before the player moves into it */
@@ -410,6 +447,7 @@ static UILabel *paneLabel(CGFloat size, UIColor *c, int lines) {
         return;
     }
     _full = NO;
+    _player.fullscreen = NO;
     [[UIApplication sharedApplication] setStatusBarHidden:NO withAnimation:UIStatusBarAnimationNone];
     UIInterfaceOrientation before = _orientationBeforeFull;
     [self dismissViewControllerAnimated:NO completion:^{

@@ -1,6 +1,6 @@
 Package: dev.padtube.app
 Name: PadTube
-Version: 0.1.0
+Version: 0.2.0
 Architecture: iphoneos-arm
 Description: YouTube client for old iPads, from iOS 6. Not affiliated with Google or YouTube.
 Maintainer: PadTube contributors

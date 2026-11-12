@@ -24,7 +24,7 @@
 @end
 
 @interface TBFormat : NSObject
-@property (nonatomic) int itag, width, height, bitrate;
+@property (nonatomic) int itag, width, height, bitrate, fps;
 @property (nonatomic) BOOL audio;
 @property (nonatomic, copy) NSString *url, *mime, *audioTrackId, *audioTrackName;
 @property (nonatomic) BOOL audioDefault;
@@ -34,11 +34,13 @@
 @interface TBPlayerInfo : NSObject
 @property (nonatomic, copy) NSString *status, *reason, *title, *author, *channelId, *descriptionText, *views, *hlsUrl;
 @property (nonatomic, strong) NSArray *videoFormats; /* avc1, height <= 720, ascending */
+@property (nonatomic, strong) NSArray *portraitFormats; /* avc1, short side <= 720 (vertical videos: Shorts, D54), ascending */
 @property (nonatomic, strong) NSArray *audioFormats; /* mp4a.40.2 */
 @property (nonatomic, strong) NSArray *captionTracks;
 @property (nonatomic) int lengthSeconds;
 @property (nonatomic) BOOL live;
 @property (nonatomic) double netMs;
+@property (nonatomic) BOOL signedIn;    /* came from the signed-in path (D64) */
 @end
 
 @interface TBNextInfo : NSObject
@@ -54,14 +56,20 @@
 @property (nonatomic, copy) NSString *text;
 @end
 
+/* The PadTube text for a player answer that is not OK: YouTube's bot check gets a plain explanation, not its own
+ * "Sign in to confirm you're not a bot" (owner 2026-11-13, D60). */
+NSString *TBPlayerProblem(TBPlayerInfo *info);
+
 @interface TBCore : NSObject
 + (void)start;                         /* TLS roots, visitor ID, HLS server */
 + (NSString *)stateDir;
 + (dispatch_queue_t)queue;
 + (void)search:(NSString *)q continuation:(NSString *)c done:(void (^)(TBPage *))done;
++ (void)shorts:(NSString *)continuation done:(void (^)(TBPage *))done;   /* nil: the first page (D53) */
 + (void)search:(NSString *)q params:(NSString *)params continuation:(NSString *)c done:(void (^)(TBPage *))done;
 + (void)suggest:(NSString *)q done:(void (^)(NSArray *))done;
 + (void)player:(NSString *)videoId done:(void (^)(TBPlayerInfo *))done;
++ (void)player:(NSString *)videoId visitorReset:(BOOL)reset done:(void (^)(TBPlayerInfo *))done;   /* NO: Shorts preloads (tb_yt_player_opt) */
 + (void)next:(NSString *)videoId done:(void (^)(TBNextInfo *))done;
 + (void)captions:(TBCaptionTrack *)t done:(void (^)(NSArray *cues))done;
 + (void)channel:(NSString *)channelId tab:(NSString *)params continuation:(NSString *)c done:(void (^)(TBPage *))done;

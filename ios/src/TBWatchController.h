@@ -11,4 +11,5 @@
 + (TBWatchController *)current;
 - (void)toggleFullscreen;           /* full screen is always landscape; the old orientation comes back after */
 @property (nonatomic, readonly) BOOL isFullscreen;
+- (NSString *)swipeTab:(int)dir;   /* the tab swipe handler: +1 next tab, -1 previous; returns the selected tab (D52) */
 @end

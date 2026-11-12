@@ -38,10 +38,6 @@
 			<true/>
 		</dict>
 	</dict>
-	<key>UIPrerenderedIcon</key>
-	<true/>
-	<key>UILaunchImageFile</key>
-	<string>Default</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.padtube.app</string>
 	<key>CFBundleName</key>
@@ -49,11 +45,18 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>0.1.2</string>
+	<string>0.2.0</string>
 	<key>MinimumOSVersion</key>
 	<string>6.0</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
@@ -62,13 +65,10 @@
 	<array>
 		<integer>2</integer>
 	</array>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
+	<key>UILaunchImageFile</key>
+	<string>Default</string>
+	<key>UIPrerenderedIcon</key>
+	<true/>
 	<key>UIRequiresFullScreen</key>
 	<true/>
 	<key>UIRequiresPersistentWiFi</key>

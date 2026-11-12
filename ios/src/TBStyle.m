@@ -366,6 +366,29 @@ static void thumb(CGContextRef c, CGFloat s, BOOL down) {
         } else if ([n isEqualToString:@"account"]) {
             CGContextFillEllipseInRect(c, CGRectMake(8 * k, 2 * k, 10 * k, 10 * k));
             CGContextFillEllipseInRect(c, CGRectMake(3 * k, 14 * k, 20 * k, 18 * k));
+        } else if ([n isEqualToString:@"shorts"]) { /* a tall 9:16 frame with a play mark (guide row, D53) */
+            [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(7 * k, 2 * k, 12 * k, 22 * k) cornerRadius:3 * k] fill];
+            CGContextSetBlendMode(c, kCGBlendModeClear);
+            CGContextMoveToPoint(c, 11 * k, 9 * k); CGContextAddLineToPoint(c, 16.5 * k, 13 * k); CGContextAddLineToPoint(c, 11 * k, 17 * k);
+            CGContextFillPath(c);
+            CGContextSetBlendMode(c, kCGBlendModeNormal);
+        } else if ([n isEqualToString:@"reload"]) { /* circular arrow (Shorts header) */
+            CGContextSetLineWidth(c, 2.6 * k);
+            CGContextAddArc(c, 13 * k, 13 * k, 9 * k, (CGFloat)(-M_PI * 0.35), (CGFloat)(M_PI * 1.45), 0);
+            CGContextStrokePath(c);
+            CGContextMoveToPoint(c, 15 * k, 1 * k); CGContextAddLineToPoint(c, 23 * k, 5 * k); CGContextAddLineToPoint(c, 16 * k, 10 * k);
+            CGContextFillPath(c);
+        } else if ([n isEqualToString:@"comment"]) { /* speech bubble */
+            [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(2 * k, 3 * k, 22 * k, 15 * k) cornerRadius:4 * k] fill];
+            CGContextMoveToPoint(c, 7 * k, 17 * k); CGContextAddLineToPoint(c, 7 * k, 24 * k); CGContextAddLineToPoint(c, 14 * k, 17 * k);
+            CGContextFillPath(c);
+        } else if ([n isEqualToString:@"share"]) { /* curved arrow to the right */
+            CGContextMoveToPoint(c, 15 * k, 3 * k); CGContextAddLineToPoint(c, 25 * k, 12 * k); CGContextAddLineToPoint(c, 15 * k, 21 * k);
+            CGContextFillPath(c);
+            CGContextSetLineWidth(c, 4 * k);
+            CGContextMoveToPoint(c, 16 * k, 12 * k);
+            CGContextAddCurveToPoint(c, 9 * k, 12 * k, 3 * k, 14 * k, 2 * k, 23 * k);
+            CGContextStrokePath(c);
         } else if ([n isEqualToString:@"play"]) {
             CGContextMoveToPoint(c, 6 * k, 3 * k); CGContextAddLineToPoint(c, 23 * k, 13 * k); CGContextAddLineToPoint(c, 6 * k, 23 * k);
             CGContextFillPath(c);

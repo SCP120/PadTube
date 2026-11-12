@@ -5,4 +5,5 @@
 @interface TBAccountController : UIViewController
 @property (nonatomic, readonly) NSString *shownCode;   /* for the self-test */
 - (void)startSignIn;
+@property (nonatomic, copy) NSString *notice;   /* shown under the code (the session ended) */
 @end

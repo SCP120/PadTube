@@ -1,6 +1,7 @@
 #import "TBPlayerView.h"
 #import "TBLog.h"
 #import <AVFoundation/AVFoundation.h>
+#import <QuartzCore/QuartzCore.h>
 #import <MediaPlayer/MediaPlayer.h>
 #import <CoreMedia/CoreMedia.h>
 #import "TBCore.h"
@@ -17,7 +18,7 @@ static NSString *timeText(double t) {
     return h ? [NSString stringWithFormat:@"%d:%02d:%02d", h, m, s] : [NSString stringWithFormat:@"%d:%02d", m, s];
 }
 
-@interface TBPlayerView () <UIActionSheetDelegate>
+@interface TBPlayerView () <UIActionSheetDelegate, UIGestureRecognizerDelegate>
 @end
 
 /* A view whose layer is an AVPlayerLayer (the AVPlayer engine draws the video here). */
@@ -58,6 +59,12 @@ static void *kItemCtx = &kItemCtx, *kLayerCtx = &kLayerCtx;
     double _t0, _hideAt;
     NSArray *_heights;
     float _rate;
+    /* gestures (D50, D51) */
+    UITapGestureRecognizer *_tap, *_doubleTap;
+    UISwipeGestureRecognizer *_swipeDown;
+    UILabel *_skip;
+    BOOL _tapPrevShown;
+    double _lastTapMs;
 }
 
 - (id)initWithFrame:(CGRect)f {
@@ -119,8 +126,25 @@ static void *kItemCtx = &kItemCtx, *kLayerCtx = &kLayerCtx;
     /* iOS 6: an alarm or a call interrupts; headphones out changes the route (owner 2026-11-12) */
     [nc addObserver:self selector:@selector(audioInterrupted:) name:AVAudioSessionInterruptionNotification object:nil];
     [nc addObserver:self selector:@selector(routeChanged:) name:AVAudioSessionRouteChangeNotification object:nil];
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped:)];
-    [self addGestureRecognizer:tap];
+    _tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped:)];
+    _tap.delegate = self;
+    [self addGestureRecognizer:_tap];
+    _doubleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(doubleTapped:)];
+    _doubleTap.numberOfTapsRequired = 2;
+    _doubleTap.delegate = self;
+    [self addGestureRecognizer:_doubleTap];
+    _swipeDown = [[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipedDown)];
+    _swipeDown.direction = UISwipeGestureRecognizerDirectionDown;
+    _swipeDown.delegate = self;
+    _swipeDown.enabled = NO;   /* full screen only */
+    [self addGestureRecognizer:_swipeDown];
+    _skip = [UILabel new];
+    _skip.font = TBFontBold(20);
+    _skip.textColor = [UIColor whiteColor];
+    _skip.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6f];
+    _skip.textAlignment = NSTextAlignmentCenter;
+    _skip.alpha = 0;
+    [self addSubview:_skip];
     return self;
 }
 
@@ -198,7 +222,7 @@ static void *kItemCtx = &kItemCtx, *kLayerCtx = &kLayerCtx;
     _caption.hidden = YES;
     [self showMessage:nil];
     if (![info.status isEqualToString:@"OK"]) {
-        [self showMessage:info.reason.length ? info.reason : [NSString stringWithFormat:@"This video cannot play (%@).", info.status ?: @"error"]];
+        [self showMessage:TBPlayerProblem(info)];
         return;
     }
     if (info.live) {
@@ -729,7 +753,49 @@ static AVPlayer *g_av;
 /* ---------- controls ---------- */
 
 - (void)tapped:(UITapGestureRecognizer *)g {
+    double now = tb_now_ms();
+    /* the first tap of a possible double tap: remember the controls (UIKit's double tap waits about 350 ms) */
+    if (now - _lastTapMs > 400) _tapPrevShown = _controlsShown;
+    _lastTapMs = now;
     if (_controlsShown) [self hideControls]; else [self showControls];
+}
+
+/* ---------- gestures: double tap to skip (D51), swipe down to leave full screen (D50) ---------- */
+
+- (void)setFullscreen:(BOOL)f { _fullscreen = f; _swipeDown.enabled = f; }
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)g shouldReceiveTouch:(UITouch *)t {
+    if (g == _tap) return YES;
+    return _bar.hidden || ![t.view isDescendantOfView:_bar];   /* the control bar keeps its own touches */
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)a shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)b {
+    return (a == _tap && b == _doubleTap) || (a == _doubleTap && b == _tap);   /* single taps act at once */
+}
+
+- (void)doubleTapped:(UITapGestureRecognizer *)g { [self doubleTapAt:[g locationInView:self]]; }
+
+- (int)doubleTapAt:(CGPoint)p {
+    if (_tapPrevShown) [self showControls]; else [self hideControls];   /* undo the two single taps */
+    CGFloat w = self.bounds.size.width;
+    int s = p.x < w / 3 ? -10 : p.x > w * 2 / 3 ? 10 : 0;
+    double d = self.duration;
+    if (!s || _info.live || d <= 0) return 0;
+    [self seekTo:MAX(0, MIN(d - 1, self.currentTime + s))];
+    _skip.text = s < 0 ? @"-10 s" : @"+10 s";
+    CGRect b = self.bounds;
+    _skip.frame = CGRectMake(s < 0 ? b.size.width / 6 - 50 : b.size.width * 5 / 6 - 50, b.size.height / 2 - 22, 100, 44);
+    [self bringSubviewToFront:_skip];
+    [_skip.layer removeAllAnimations];
+    _skip.alpha = 1;
+    [UIView animateWithDuration:0.25 delay:0.75 options:UIViewAnimationOptionBeginFromCurrentState animations:^{ self->_skip.alpha = 0; } completion:nil];
+    return s;
+}
+
+- (BOOL)swipedDown {
+    if (!_fullscreen) return NO;
+    [self.delegate playerViewToggleFullscreen:self];
+    return YES;
 }
 
 - (void)showControls {

@@ -12,6 +12,9 @@ This product includes or links:
 - yyjson 0.12.0, https://github.com/ibireme/yyjson - MIT (third_party/vendor/yyjson-LICENSE.txt)
 - QR Code generator library (C), Project Nayuki, https://www.nayuki.io/page/qr-code-generator-library
   - MIT (third_party/vendor/qrcodegen-LICENSE.txt)
+- core/tb_jsprep.c follows the method of yt-dlp ejs 0.8.0 (https://github.com/yt-dlp/ejs, Unlicense): it makes
+  the same "preprocessed player" (the player's statements, a small environment prelude and wrappers around the
+  function that holds YouTube's URL challenge code), written again in C for PadTube; no ejs code is included.
 - Root certificates (roots.pem in the app): the public CA certificate bundle of the macOS build machine
   (/etc/ssl/cert.pem), used to check YouTube's TLS certificates on iOS versions with old root stores.
 

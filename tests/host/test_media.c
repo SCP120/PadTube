@@ -292,6 +292,99 @@ TB_TEST(test_hls_server_plays_in_ffmpeg, "BR-PLAY-REMUX BR-PLAY-START AC-PLAY-3 
     tb_stream_free(s);
 }
 
+TB_TEST(test_hls_two_extra_streams_with_current, "BR-SHORTS-TWO-PLAYERS") {
+    /* D54: the Shorts players need two streams served at once, next to the watch page's current stream */
+    ensure_fixtures();
+    fs_start();
+    CHECK(tb_hls_start() > 0);
+    tb_stream *cur = fixture_stream(), *a = fixture_stream(), *b = fixture_stream();
+    CHECK(cur && a && b);
+    int order[1] = {0};
+    tb_hls_set(cur, order, 1);
+    int ga = tb_hls_add(a), gb = tb_hls_add(b);
+    CHECK(ga > 0 && gb > 0 && ga != gb);
+    char ua[128], ub[128], uc[128], cmd[600];
+    tb_hls_url_gen(ga, 0, ua, sizeof ua);
+    tb_hls_url_gen(gb, 0, ub, sizeof ub);
+    tb_hls_url(0, 0, uc, sizeof uc);
+    /* all three decode in full at the same time (360 frames each) */
+    snprintf(cmd, sizeof cmd, "for u in '%s' '%s' '%s'; do (ffprobe -v error -count_frames -select_streams v -show_entries stream=nb_read_frames -of csv=p=0 $u | head -1 > " FIX "/n_$(echo $u | md5 -q)) & done; wait;"
+             "test $(cat " FIX "/n_* | sort -u) = 360", ua, ub, uc);
+    system("rm -f " FIX "/n_*");
+    CHECK_INT(system(cmd), 0);
+    /* a removed stream is gone; the others stay */
+    tb_hls_remove(ga);
+    tb_req rq = {.url = ua, .range_start = -1};
+    tb_resp r;
+    CHECK_INT(tb_http(&rq, &r), 404);
+    tb_resp_free(&r);
+    rq.url = ub;
+    CHECK_INT(tb_http(&rq, &r), 200);
+    tb_resp_free(&r);
+    rq.url = uc;
+    CHECK_INT(tb_http(&rq, &r), 200);
+    tb_resp_free(&r);
+    /* the slots are limited and come back after a remove */
+    int g[TB_HLS_EXTRA], n = 0;
+    while (n < TB_HLS_EXTRA && (g[n] = tb_hls_add(a)) > 0) n++;
+    CHECK_INT(n, TB_HLS_EXTRA - 1);   /* gb still holds one */
+    CHECK_INT(tb_hls_add(a), -1);
+    for (int i = 0; i < n; i++) tb_hls_remove(g[i]);
+    tb_hls_remove(gb);
+    tb_hls_set(NULL, NULL, 0);
+    tb_stream_free(cur);
+    tb_stream_free(a);
+    tb_stream_free(b);
+}
+
+static void *get_seg1(void *url) {   /* GET in a thread: the gate holds it */
+    tb_req rq = {.url = url, .range_start = -1, .timeout_ms = 10000};
+    tb_resp r;
+    intptr_t st = tb_http(&rq, &r);
+    tb_resp_free(&r);
+    return (void *)st;
+}
+
+TB_TEST(test_hls_preload_gate, "BR-SHORTS-PRELOAD-GATE") {
+    /* a preloaded Short gets segment 0 only; segment 1 waits until the gate opens (owner preload strategy) */
+    ensure_fixtures();
+    fs_start();
+    CHECK(tb_hls_start() > 0);
+    tb_stream *a = fixture_stream();
+    int g = tb_hls_add(a);
+    CHECK(g > 0);
+    tb_hls_limit(g, 0);
+    char base[128], u0[160], u1[160];
+    tb_hls_url_gen(g, 0, base, sizeof base);
+    *strrchr(base, '/') = 0;
+    snprintf(u0, sizeof u0, "%s/0/0.ts", base);
+    snprintf(u1, sizeof u1, "%s/0/1.ts", base);
+    tb_req rq = {.url = u0, .range_start = -1};
+    tb_resp r;
+    CHECK_INT(tb_http(&rq, &r), 200);
+    tb_resp_free(&r);
+    CHECK_INT(tb_hls_served_max(g), 0);
+    pthread_t t;
+    pthread_create(&t, NULL, get_seg1, u1);
+    usleep(1500 * 1000);
+    CHECK_INT(tb_hls_served_max(g), 0);       /* still held after 1.5 s */
+    double t0 = tb_now_ms();
+    tb_hls_limit(g, TB_HLS_OPEN);
+    void *st;
+    pthread_join(t, &st);
+    CHECK_INT((int)(intptr_t)st, 200);
+    CHECK(tb_now_ms() - t0 < 1000);           /* answered as soon as the gate opened */
+    CHECK_INT(tb_hls_served_max(g), 1);
+    tb_hls_limit(g, TB_HLS_FREEZE);           /* freeze at what was served: segment 2 waits, a removal ends it */
+    snprintf(u1, sizeof u1, "%s/0/2.ts", base);
+    pthread_create(&t, NULL, get_seg1, u1);
+    usleep(500 * 1000);
+    tb_hls_remove(g);
+    pthread_join(t, &st);
+    CHECK_INT((int)(intptr_t)st, 404);
+    tb_stream_free(a);
+}
+
 TB_TEST(test_audio_only_playlist, "AC-BG-1") {
     ensure_fixtures();
     fs_start();
