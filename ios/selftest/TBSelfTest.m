@@ -26,6 +26,7 @@
 #import "TBWatchController.h"
 #import "TBStyle.h"
 #import "TBLinks.h"
+#import "TBLog.h"
 #include "tb_hls.h"
 #include "tb_http.h"
 #include "tb_jsprep.h"
@@ -559,6 +560,34 @@ static NSString *handle(NSString *line, void (^later)(NSString *)) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC), dispatch_get_main_queue(), reply);
         return nil;
     }
+    if ([cmd isEqualToString:@"sfeed"]) { /* sfeed <id,id,...>: the Shorts tab with a fixed list; answers at the first frame */
+        NSMutableArray *items = [NSMutableArray array];
+        for (NSString *v in [arg componentsSeparatedByString:@","]) {
+            if (!v.length) continue;
+            TBItem *it = [TBItem new];
+            it.ident = v;
+            it.title = v;
+            [items addObject:it];
+        }
+        if (!items.count) return @"error: no ids";
+        double t0 = tb_now_ms();
+        [g_shell selectGuideRow:(NSInteger)[[TBShell guideTitles] indexOfObject:@"Shorts"]];
+        TBShortsController *c = (TBShortsController *)topVC();
+        if (![c isKindOfClass:[TBShortsController class]]) return @"error: no Shorts tab";
+        __block BOOL answered = NO;
+        void (^reply)(void) = ^{
+            if (answered) return;
+            answered = YES;
+            c.firstFrame = nil;
+            NSMutableDictionary *d = [[c testState] mutableCopy];
+            d[@"open_to_frame_ms"] = @(tb_now_ms() - t0);
+            later(json(d));
+        };
+        c.firstFrame = ^(TBShortsController *x) { reply(); };
+        [c testFeed:items];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC), dispatch_get_main_queue(), reply);
+        return nil;
+    }
     if ([cmd isEqualToString:@"sswipe"]) { /* sswipe <1|-1> [drag ms] [snap ms] */
         TBShortsController *c = (TBShortsController *)topVC();
         if (![c isKindOfClass:[TBShortsController class]]) return @"error: not on Shorts";
@@ -584,12 +613,14 @@ static NSString *handle(NSString *line, void (^later)(NSString *)) {
         d[@"t"] = @(c.current.currentTime);
         return json(d);
     }
-    if ([cmd isEqualToString:@"sab"]) { /* sab <prepare 0|1> <max width> [slots]: Shorts A/B switches (slots: next Shorts tab) */
+    if ([cmd isEqualToString:@"sab"]) { /* sab <prepare 0|1> <max width> [slots] [gate] [preroll] [ahead s]: Shorts A/B switches (slots: next Shorts tab) */
         [[NSUserDefaults standardUserDefaults] setBool:[p[1] intValue] == 0 forKey:@"TBShortsNoPrepare"];
         [[NSUserDefaults standardUserDefaults] setInteger:[p[2] intValue] forKey:@"TBShortsMaxWidth"];
         [[NSUserDefaults standardUserDefaults] setInteger:p.count > 3 ? [p[3] intValue] : 0 forKey:@"TBShortsSlots"];
         [[NSUserDefaults standardUserDefaults] setBool:p.count > 4 && [p[4] intValue] == 1 forKey:@"TBShortsGate"];
         [[NSUserDefaults standardUserDefaults] setBool:p.count > 5 && [p[5] intValue] == 1 forKey:@"TBShortsPreroll"];
+        if (p.count > 6) [[NSUserDefaults standardUserDefaults] setDouble:[p[6] doubleValue] forKey:@"TBShortsAhead"];   /* < 0: no limit */
+        else [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"TBShortsAhead"];   /* the built-in value */
         return @"ok";
     }
     if ([cmd isEqualToString:@"sreload"]) { /* the reload button; answers at the first new Short's first frame */
@@ -777,6 +808,7 @@ static NSString *handle(NSString *line, void (^later)(NSString *)) {
         d.batteryMonitoringEnabled = YES;
         tb_yt_counts yc;
         tb_yt_get_counts(&yc);
+        TBLog(@"PadTube: net mark %@ %lld B", arg, (long long)ns.bytes_in);   /* finds the window in the syslog */
         return json(@{@"bytes_in": @(ns.bytes_in), @"requests": @(ns.requests), @"cpu_s": @(cpu), @"battery": @(d.batteryLevel), @"battery_state": @(d.batteryState),
                       @"player_calls": @(yc.player_calls), @"login_required": @(yc.login_required), @"visitor_resets": @(yc.visitor_resets)});
     }

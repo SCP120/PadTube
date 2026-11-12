@@ -17,4 +17,5 @@
 - (void)openComments;
 - (void)share:(BOOL)open;                                      /* self-test: the share sheet of the Short on screen */
 - (NSDictionary *)testState;
+- (void)testFeed:(NSArray *)items;   /* self-test: a fixed list of Shorts (TBItem) instead of the feed */
 @end

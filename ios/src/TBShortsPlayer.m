@@ -35,7 +35,7 @@ static void releaseLater(id obj) {   /* after the main thread's autorelease pool
     AVPlayerItem *_item;
     id _boundary;
     tb_stream *_stream;
-    int _gen;
+    int _gen, _stalls;
     double _loadAt, _playAt;
     BOOL _resumeOnActive;
 }
@@ -108,6 +108,15 @@ static void releaseLater(id obj) {   /* after the main thread's autorelease pool
     }];
 }
 
+/* Forward-buffer limit (D67): the server serves only segments that start at most this many seconds after the play
+ * position. Without it AVPlayer buffers up to about 50 s ahead and a swipe drops it (D66, MEASURED). The value is the
+ * result of the iPad A/B in docs/STATUS.md; TBShortsAhead (self-test) overrides it, < 0: no limit. */
+static const double kAhead = 10;
+static double aheadLimit(void) {
+    id v = [[NSUserDefaults standardUserDefaults] objectForKey:@"TBShortsAhead"];
+    return v ? [v doubleValue] : kAhead;
+}
+
 /* 720 wide at 30 fps or less, else 480 wide (D54); a video that is not vertical: its highest height <= 720 */
 static TBFormat *pickFormat(TBPlayerInfo *info) {
     TBFormat *best = nil;
@@ -131,10 +140,13 @@ static TBFormat *pickFormat(TBPlayerInfo *info) {
     }
     tb_stream_fmt vf = {v.itag, (char *)v.url.UTF8String, v.width, v.height, v.bitrate, v.indexEnd, v.contentLength};
     tb_stream_fmt af = {a.itag, (char *)a.url.UTF8String, 0, 0, a.bitrate, a.indexEnd, a.contentLength};
+    TBLog(@"PadTube: Short %@ format itag %d %dx%d %d fps %d kbit/s, video %lld B, audio %lld B, %d s", _videoId, v.itag, v.width, v.height,
+          v.fps, v.bitrate / 1000, v.contentLength, a.contentLength, info.lengthSeconds);
     _stream = tb_stream_new(&vf, 1, &af);
     _gen = _stream ? tb_hls_add(_stream) : -1;
     if (_gen < 0) { _errorText = @"Player not ready."; [self notify]; return; }
     if (_preloadOnly && gateOn()) tb_hls_limit(_gen, 0);
+    [self limitTick:_gen];
     tb_stream_warm(_stream, 0, 0);   /* the first segment downloads now */
     char url[128];
     tb_hls_url_gen(_gen, 0, url, sizeof url);
@@ -152,8 +164,24 @@ static TBFormat *pickFormat(TBPlayerInfo *info) {
     [self notify];
 }
 
+/* once a second while this stream is loaded: the time limit follows the play position (a loop starts it again at 0) */
+- (void)limitTick:(int)gen {
+    if (gen < 0 || gen != _gen) return;
+    double a = aheadLimit();
+    tb_hls_limit_time(gen, a < 0 ? -1 : self.currentTime + a);
+    __weak TBShortsPlayer *w = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [w limitTick:gen]; });
+}
+
+- (void)stalled:(NSNotification *)n {
+    _stalls++;
+    TBLog(@"PadTube: Short %@ playback stalled at %.1f s (%.1f s buffered ahead)", _videoId, self.currentTime, self.bufferedAhead);
+}
+
 - (void)use:(AVPlayerItem *)item {
     _item = item;
+    _stalls = 0;
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(stalled:) name:AVPlayerItemPlaybackStalledNotification object:_item];
     [_item addObserver:self forKeyPath:@"status" options:0 context:kStatusCtx];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(ended:) name:AVPlayerItemDidPlayToEndTimeNotification object:_item];
     [_player replaceCurrentItemWithPlayerItem:_item];
@@ -274,12 +302,20 @@ static BOOL gateOn(void) { return [[NSUserDefaults standardUserDefaults] boolFor
 - (void)active { if (_resumeOnActive && _wantsPlay) [_player play]; _resumeOnActive = NO; }
 
 - (void)unload {
+    if (_stream) {   /* what this Short cost (D65 data check): bytes fetched against what was watched */
+        tb_stream_stats st;
+        tb_stream_get_stats(_stream, &st);
+        double d = CMTimeGetSeconds(_item.duration);
+        TBLog(@"PadTube: Short %@ let go: %ld B fetched, %d segments, %.1f s built; at %.1f s, %.1f s buffered ahead, %.1f s long, %d stalls",
+              _videoId, st.bytes_fetched, st.segments_built, st.media_s_total, self.currentTime, self.bufferedAhead, isfinite(d) ? d : -1, _stalls);
+    }
     [_player pause];
     _wantsPlay = NO;
     if (_boundary) { [_player removeTimeObserver:_boundary]; _boundary = nil; }
     if (_item) {
         [_item removeObserver:self forKeyPath:@"status" context:kStatusCtx];
         [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemDidPlayToEndTimeNotification object:_item];
+        [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemPlaybackStalledNotification object:_item];
         [_player replaceCurrentItemWithPlayerItem:nil];
         releaseLater(_item);
         _item = nil;

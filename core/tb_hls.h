@@ -24,6 +24,10 @@ void tb_hls_url_gen(int gen, int vi, char *out, size_t cap);   /* http://127.0.0
 #define TB_HLS_OPEN (-1)
 #define TB_HLS_FREEZE (-2)
 void tb_hls_limit(int gen, int max_seg);
+/* Time limit of an extra stream (Shorts forward buffer, D67): requests and prefetches for segments that start after
+ * max_start_s wait until the limit rises or the stream is removed. A negative value: no time limit. Works together
+ * with tb_hls_limit: a segment must pass both. */
+void tb_hls_limit_time(int gen, double max_start_s);
 int tb_hls_served_max(int gen);   /* highest segment served, -1 if none or unknown gen */
 typedef struct { int requests, segments, errors, last_seg; double last_serve_ms; } tb_hls_stats;
 void tb_hls_get_stats(tb_hls_stats *out);

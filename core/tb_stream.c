@@ -443,6 +443,15 @@ int tb_stream_ready(tb_stream *s, int vi, double at) {
     return ok;
 }
 
+double tb_stream_seg_start(tb_stream *s, int vi, int seg) {
+    pthread_mutex_lock(&s->mu);
+    variant *v = var(s, vi);
+    double t = -1;
+    if (v && v->ready && seg >= 0 && seg < v->sidx.n) t = seg == 0 ? 0 : (double)v->sidx.segs[seg].start / v->sidx.timescale;
+    pthread_mutex_unlock(&s->mu);
+    return t;
+}
+
 static void start_prefetch(tb_stream *s, int vi, int seg, double at) {
     /* smu only: this runs on the main thread (warm-up at a start); a segment already in the cache is found by
      * the prefetch thread itself (get_locked) */

@@ -62,6 +62,21 @@ TB_TEST(test_parse_next_fixture, "AC-VPAGE-1") {
     tb_next_free(&x);
 }
 
+/* layout seen 2026-11-13: the title is in videoMetadataViewModel, not slimVideoInformationRenderer (masked answer) */
+TB_TEST(test_parse_next_view_model_title, "AC-VPAGE-1 AC-WATCH-2") {
+    size_t n; char *j = load("next_aircAruvnKk_vm.json", &n); CHECK(j);
+    tb_next x; CHECK_INT(tb_yt_parse_next(j, n, &x), 0); free(j);
+    CHECK_STR(x.title, "But what is a neural network? | Deep learning chapter 1");
+    CHECK_STR(x.views, "25,230,574 views");
+    CHECK_STR(x.date, "Oct 5, 2017");
+    CHECK_STR(x.channel, "3Blue1Brown");
+    CHECK_STR(x.channel_id, "UCYO_jab_esuFRV4b17AJtAw");
+    CHECK_STR(x.likes, "570K");
+    CHECK_INT(x.nchapters, 12);
+    CHECK_INT(x.related.n, 11);
+    tb_next_free(&x);
+}
+
 TB_TEST(test_parse_comments_fixture, "AC-COMMENTS-1") {
     size_t n; char *j = load("comments_dQw4w9WgXcQ.json", &n); CHECK(j);
     tb_comments c; CHECK_INT(tb_yt_parse_comments(j, n, &c), 0); free(j);

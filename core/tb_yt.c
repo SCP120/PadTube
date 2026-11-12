@@ -966,6 +966,8 @@ int tb_yt_parse_next(const char *json, size_t len, tb_next *n) {
     yyjson_val *res = tbj_get(root, "contents", "singleColumnWatchNextResults", "results", "results", "contents", NULL);
     yyjson_val *info = find1(res, "slimVideoInformationRenderer");
     n->title = tbj_text(tbj_get(info, "title", NULL));
+    /* the newer layout has the title in videoMetadataViewModel; views and date then come from the description panel */
+    if (!n->title) n->title = tbj_text(tbj_get(find1(res, "videoMetadataViewModel"), "title", NULL));
     /* expandedSubtitle runs: "1,234 views", " · ", "3 days ago" - the order and count vary between A/B layouts */
     yyjson_val *sub = tbj_get(info, "expandedSubtitle", "runs", NULL), *run;
     size_t ri, rmax;
@@ -1018,7 +1020,7 @@ int tb_yt_parse_next(const char *json, size_t len, tb_next *n) {
 
 /* Watch page mask: 44 KB -> 4.9 KB gzip, 325 KB -> 15 KB JSON (MEASURED 2026-11-11, aircAruvnKk). */
 #define M_LIKE "slimVideoActionBarRenderer(buttons(slimMetadataButtonRenderer(button(segmentedLikeDislikeButtonViewModel(likeButtonViewModel(likeButtonViewModel(toggleButtonViewModel(toggleButtonViewModel(defaultButtonViewModel(buttonViewModel(title)))))))))))"
-#define M_META "slimVideoMetadataSectionRenderer(contents(slimVideoInformationRenderer(title" R_ ",expandedSubtitle" R_ "),slimOwnerRenderer(title" R_ ",navigationEndpoint(browseEndpoint(browseId)),thumbnail(thumbnails(url,width)),expandedSubtitle" R_ ",subscribeButton(subscribeButtonRenderer(subscribed)))," M_LIKE "))"
+#define M_META "slimVideoMetadataSectionRenderer(contents(slimVideoInformationRenderer(title" R_ ",expandedSubtitle" R_ "),videoMetadataViewModel(title(content)),slimOwnerRenderer(title" R_ ",navigationEndpoint(browseEndpoint(browseId)),thumbnail(thumbnails(url,width)),expandedSubtitle" R_ ",subscribeButton(subscribeButtonRenderer(subscribed)))," M_LIKE "))"
 #define M_RES "contents(singleColumnWatchNextResults(results(results(contents(" M_META ",itemSectionRenderer(contents(" M_VIDEO ",continuationItemRenderer(continuationEndpoint(continuationCommand(token))))))))))"
 #define M_PANELS "engagementPanels(engagementPanelSectionListRenderer(panelIdentifier,header(engagementPanelTitleHeaderRenderer(contextualInfo)),content(sectionListRenderer(contents(itemSectionRenderer(contents(continuationItemRenderer(continuationEndpoint(continuationCommand(token))))))),structuredDescriptionContentRenderer(items(videoDescriptionHeaderRenderer(publishDate,views),expandableVideoDescriptionBodyRenderer(attributedDescriptionBodyText(content)))))))"
 #define M_CHAPTERS "playerOverlays(playerOverlayRenderer(decoratedPlayerBarRenderer(decoratedPlayerBarRenderer(playerBar(multiMarkersPlayerBarRenderer(markersMap(key,value(chapters(chapterRenderer(title" R_ ",timeRangeStartMillis))))))))))"

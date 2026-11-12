@@ -1,6 +1,7 @@
 /* MP4 reader, TS writer, segment builder and HLS server on synthetic fixtures (tests/host/make_fixtures.sh).
  * ffprobe / ffmpeg (Homebrew) are the independent judges of the TS and HLS output. */
 #include <arpa/inet.h>
+#include <math.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -378,6 +379,55 @@ TB_TEST(test_hls_preload_gate, "BR-SHORTS-PRELOAD-GATE") {
     tb_hls_limit(g, TB_HLS_FREEZE);           /* freeze at what was served: segment 2 waits, a removal ends it */
     snprintf(u1, sizeof u1, "%s/0/2.ts", base);
     pthread_create(&t, NULL, get_seg1, u1);
+    usleep(500 * 1000);
+    tb_hls_remove(g);
+    pthread_join(t, &st);
+    CHECK_INT((int)(intptr_t)st, 404);
+    tb_stream_free(a);
+}
+
+TB_TEST(test_hls_time_limit, "BR-SHORTS-FORWARD-LIMIT") {
+    /* Shorts forward buffer (D67): a segment that starts after the time limit waits until the limit rises */
+    ensure_fixtures();
+    fs_start();
+    CHECK(tb_hls_start() > 0);
+    tb_stream *a = fixture_stream();
+    int g = tb_hls_add(a);
+    CHECK(g > 0);
+    tb_hls_limit_time(g, 2.1);
+    char base[128], u[160], pl[160];
+    tb_hls_url_gen(g, 0, base, sizeof base);
+    snprintf(pl, sizeof pl, "%s", base);
+    *strrchr(base, '/') = 0;
+    tb_req rq = {.url = pl, .range_start = -1};
+    tb_resp r;
+    CHECK_INT(tb_http(&rq, &r), 200);        /* the playlist is never held */
+    tb_resp_free(&r);
+    CHECK(tb_stream_seg_start(a, 0, 0) == 0);
+    /* the fixture: 2 s segments; a start is a presentation time, 2 frames (at 30 fps) after the cut */
+    CHECK(fabs(tb_stream_seg_start(a, 0, 1) - 2.066667) < 1e-5);
+    CHECK(fabs(tb_stream_seg_start(a, 0, 2) - 4.066667) < 1e-5);
+    CHECK(tb_stream_seg_start(a, 0, 6) == -1);    /* 6 segments: no segment 6 */
+    for (int i = 0; i < 2; i++) {             /* 0 s and 2.07 s: not after the limit */
+        snprintf(u, sizeof u, "%s/0/%d.ts", base, i);
+        rq.url = u;
+        CHECK_INT(tb_http(&rq, &r), 200);
+        tb_resp_free(&r);
+    }
+    snprintf(u, sizeof u, "%s/0/2.ts", base);
+    pthread_t t;
+    pthread_create(&t, NULL, get_seg1, u);
+    usleep(1500 * 1000);
+    CHECK_INT(tb_hls_served_max(g), 1);       /* segment 2 (4.07 s) still held after 1.5 s */
+    double t0 = tb_now_ms();
+    tb_hls_limit_time(g, 4.1);
+    void *st;
+    pthread_join(t, &st);
+    CHECK_INT((int)(intptr_t)st, 200);
+    CHECK(tb_now_ms() - t0 < 1000);           /* answered as soon as the limit rose */
+    CHECK_INT(tb_hls_served_max(g), 2);
+    snprintf(u, sizeof u, "%s/0/3.ts", base);  /* 6.07 s: held; a removal ends the wait */
+    pthread_create(&t, NULL, get_seg1, u);
     usleep(500 * 1000);
     tb_hls_remove(g);
     pthread_join(t, &st);

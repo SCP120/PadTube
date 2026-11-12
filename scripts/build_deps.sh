@@ -27,6 +27,7 @@ build() { # name configure-target cflags [extra options]
   if [ -f "$prefix/lib/libssl.a" ]; then echo "kept: $prefix"; return; fi
   rm -rf "$b" "$prefix"; mkdir -p "$b/src" "$prefix"
   tar -xzf "$TGZ" -C "$b/src"
+  [ -z "${PATCH:-}" ] || patch -s -p1 -d "$b/src/openssl-$VER" < "$PATCH"
   ( cd "$b"
     CC="$CLANG" CFLAGS="$cflags" perl "$b/src/openssl-$VER/Configure" "$conf" \
       no-shared no-tests no-apps no-docs no-engine no-dso no-async no-ui-console ${1+"$@"} \
@@ -47,7 +48,18 @@ build macos-arm64 darwin64-arm64-cc "-isysroot $MAC_SDK"
 
 SDK7="$HOME/theos/sdks/iPhoneOS9.3-armv7.sdk"; SDK64="$HOME/theos/sdks/iPhoneOS16.5.sdk"
 [ -d "$SDK7" ] && [ -d "$SDK64" ] || { echo "missing theos SDKs: see README, Build" >&2; exit 1; }
-# armv7: -mno-thumb (ld-27037 writes code pointers without the Thumb bit). no-asm: current clang rejects the ios32
-# perlasm output. -DBROKEN_CLANG_ATOMICS: else clang calls ___atomic_is_lock_free, which no iOS 6 library exports.
-build ios-armv7 ios-xcrun "-mno-thumb -isysroot $SDK7 -miphoneos-version-min=6.0 -DBROKEN_CLANG_ATOMICS" no-asm
+# armv7 (D65): -mno-thumb (ld-27037 writes code pointers without the Thumb bit), so the ARMv7 assembly builds its ARM
+# variants. The patch (from the PadWeb project, see NOTICE) makes the ios32 perlasm output assemble with current clang:
+# a data cell for OPENSSL_armcap_P, and poly1305 label offsets as data. -DBROKEN_CLANG_ATOMICS: else clang calls
+# ___atomic_is_lock_free, which no iOS 6 library exports.
+PATCH="$ROOT/scripts/patches/openssl-$VER-ios-armv7-asm.patch" \
+  build ios-armv7 ios-xcrun "-mno-thumb -isysroot $SDK7 -miphoneos-version-min=6.0 -DBROKEN_CLANG_ATOMICS"
+# gates: no Thumb code, and the assembly is in (grep -c, not grep -q: with pipefail, nm's SIGPIPE would fail the gate)
+A7="$TP/prefix/ios-armv7/lib"
+thumb=$(nm -m "$A7/libcrypto.a" "$A7/libssl.a" 2>/dev/null | grep -c '\[Thumb\]' || true)
+[ "$thumb" = 0 ] || { echo "ios-armv7: $thumb Thumb symbols" >&2; exit 1; }
+for s in _sha256_block_data_order _ossl_bsaes_ctr32_encrypt_blocks _gcm_ghash_neon _ChaCha20_ctr32 _poly1305_blocks \
+         _bn_mul_mont _ecp_nistz256_mul_mont; do
+  [ "$(nm "$A7/libcrypto.a" 2>/dev/null | grep -c " T $s\$" || true)" -ge 1 ] || { echo "ios-armv7: no $s (an old no-asm prefix? delete it to rebuild)" >&2; exit 1; }
+done
 build ios-arm64 ios64-xcrun "-arch arm64 -isysroot $SDK64 -miphoneos-version-min=7.0"

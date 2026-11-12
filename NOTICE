@@ -7,8 +7,10 @@ YouTube is a trademark of Google LLC.
 This product includes or links:
 
 - OpenSSL 3.5.9, https://www.openssl.org/ - Apache License 2.0
-  (third_party/vendor/OpenSSL-LICENSE.txt). Built from the release tarball by scripts/build_deps.sh,
-  not changed.
+  (third_party/vendor/OpenSSL-LICENSE.txt). Built from the release tarball by scripts/build_deps.sh.
+  For armv7 the build applies scripts/patches/openssl-3.5.9-ios-armv7-asm.patch (changes to two perlasm
+  scripts so that the ARMv7 assembly builds for iOS 6 with current clang), written for the PadWeb project
+  and used here with permission, under the terms of the Apache License 2.0. The other targets are not changed.
 - yyjson 0.12.0, https://github.com/ibireme/yyjson - MIT (third_party/vendor/yyjson-LICENSE.txt)
 - QR Code generator library (C), Project Nayuki, https://www.nayuki.io/page/qr-code-generator-library
   - MIT (third_party/vendor/qrcodegen-LICENSE.txt)

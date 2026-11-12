@@ -1,0 +1,58 @@
+diff -ru a/crypto/perlasm/arm-xlate.pl b/crypto/perlasm/arm-xlate.pl
+--- a/crypto/perlasm/arm-xlate.pl	2026-11-13 04:21:21
++++ b/crypto/perlasm/arm-xlate.pl	2026-11-13 04:21:21
+@@ -85,7 +85,18 @@
+ };
+ my $global = $globl;
+ my $extern = sub {
+-    &$globl(@_);
++    # PadWeb (iOS 6 armv7): the Apple path of the armv4 code reads OPENSSL_armcap_P through a pointer cell
++    # ("ldr rX,[rX]" under __APPLE__) at a PC-relative offset to the local label OPENSSL_armcap_P. Current clang
++    # rejects that offset to an undefined symbol, so define the cell here: a data word with the variable's address
++    # (a static library: the variable is in the same image, and dyld rebases the word). A non-lazy symbol pointer
++    # cell made ld-27106 assert (setGotCoalescable).
++    my $name = shift;
++    if ($flavour =~ /ios32/ && $name eq "OPENSSL_armcap_P") {
++	&$globl($name);
++	return ".pushsection\t__DATA,__data\n".
++	       ".p2align\t2\n$name:\n.long\t_$name\n.popsection";
++    }
++    &$globl($name, @_);
+     return;	# return nothing
+ };
+ my $type = sub {
+diff -ru a/crypto/poly1305/asm/poly1305-armv4.pl b/crypto/poly1305/asm/poly1305-armv4.pl
+--- a/crypto/poly1305/asm/poly1305-armv4.pl	2026-11-13 04:21:21
++++ b/crypto/poly1305/asm/poly1305-armv4.pl	2026-11-13 04:21:21
+@@ -59,6 +59,17 @@
+ 
+ .text
+ 
++#if __ARM_MAX_ARCH__>=7 && defined(__APPLE__) && !defined(__thumb2__)
++@ PadWeb: the Mach-O ARM assembler cannot encode a label difference as an add immediate (and adr does not reach the
++@ NEON code), so poly1305_init loads these offsets from .Lpoly1305_init instead.
++.align	2
++.Lpoly1305_offs:
++.word	.Lpoly1305_emit-.Lpoly1305_init
++.word	.Lpoly1305_emit_neon-.Lpoly1305_init
++.word	.Lpoly1305_blocks-.Lpoly1305_init
++.word	.Lpoly1305_blocks_neon-.Lpoly1305_init
++#endif
++
+ .globl	poly1305_emit
+ .globl	poly1305_blocks
+ .globl	poly1305_init
+@@ -131,6 +142,13 @@
+ 	movne	r12,r10
+ 	orr	r11,r11,#1	@ thumb-ify address
+ 	orr	r12,r12,#1
++# elif defined(__APPLE__)
++	ldreq	r12,.Lpoly1305_offs
++	ldrne	r12,.Lpoly1305_offs+4
++	add	r12,r11,r12
++	ldreq	r9,.Lpoly1305_offs+8
++	ldrne	r9,.Lpoly1305_offs+12
++	add	r11,r11,r9
+ # else
+ 	addeq	r12,r11,#(.Lpoly1305_emit-.Lpoly1305_init)
+ 	addne	r12,r11,#(.Lpoly1305_emit_neon-.Lpoly1305_init)

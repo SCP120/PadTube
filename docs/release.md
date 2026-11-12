@@ -77,6 +77,28 @@ The gate runs on the export tree and on every file in `dist/`. CI runs gitleaks 
 | The exact release files on a device | none | ⚠️ **Not installed:** they carry the bundle `dev.padtube.app`, so an install would replace the owner's own build. They differ from the tested copy only by the self-test code and the bundle ID |
 | arm64, iOS 7 and later, rootless, sideload, TrollStore | none | ⚠️ **Not run**: no 64-bit device. Said in README, install guide, release notes |
 
+## 6b. Tests for v0.2.0 (2026-11-13)
+
+| Test | Result |
+|---|---|
+| Export alone | ✅ unit 49/49; all packages built (armv7 min iOS 6.0, arm64 min iOS 7.0) |
+| Gate | ✅ `check_release.py`: nothing found in 202 files and 4 packages; gitleaks: no leaks |
+| iPad mini 1, owner's build | ✅ signed-in playback of bot-checked videos, Shorts tab (functional test + benchmark S2), gestures, thumbnails (STATUS) |
+| The exact release files on a device | ⚠️ not installed (same bundle as the owner's app); they differ from the tested build by PadWeb (none: links open in Safari) and the icon |
+| arm64, iOS 7+, rootless, sideload, TrollStore | ⚠️ not run: no 64-bit device |
+
+## 6c. Tests for v0.2.1 (2026-11-13)
+
+| Test | Result |
+|---|---|
+| Export alone | ✅ unit 51/51; all packages built (armv7 min iOS 6.0, arm64 min iOS 7.0) |
+| Gate | ✅ `check_release.py`: nothing found in 206 files and 4 packages; gitleaks: no leaks |
+| armv7 OpenSSL with assembly (D65) | ✅ a clean build from the export: 0 Thumb symbols, the 7 assembly functions present, the same exported symbols and `__text` size as the library tested on the iPad; no build path in the binary |
+| iPad mini 1, owner's build | ✅ OpenSSL A/B (CPU per MB 0.40-0.44 -> 0.17-0.21 s); Shorts forward-buffer limit (D67): 62 MB/min against 90 MB/min for v0.2.0 on the same 10 Shorts, swipe to frame 0.23-0.26 s, 0 stalls; watch page `next` 10-14 KB again (STATUS) |
+| `shorts.py` | ❌ forward swipes about every 2.9 s find the next Short not ready (3.1-3.4 s to ready) with and without the limit; better with it (portrait p50 485 against 1228 ms). Open since v0.2.0 |
+| The exact release files on a device | ⚠️ not installed (same bundle as the owner's app) |
+| arm64, iOS 7+, rootless, sideload, TrollStore | ⚠️ not run: no 64-bit device |
+
 ## 7. Steps
 
 1. Plan and decisions (this file, D44 to D48).

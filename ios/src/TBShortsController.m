@@ -353,6 +353,15 @@ static const double kBotRetryMs = 30000;
     [self loadMore];
 }
 
+- (void)testFeed:(NSArray *)items {
+    [self reload];
+    _feedGen++;   /* the feed request that reload started is dropped */
+    _loading = NO;
+    TBPage *p = [TBPage new];
+    p.items = items;
+    [self gotPage:p];
+}
+
 - (UIButton *)headerButton {   /* TBShell puts it left of the search field (2012 header style) */
     UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom];
     [b setImage:[TBStyle icon:@"reload" size:22 color:TBHex(0xAFAFAF)] forState:UIControlStateNormal];

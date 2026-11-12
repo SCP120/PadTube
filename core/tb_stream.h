@@ -36,6 +36,9 @@ void tb_stream_abort_before(tb_stream *s, double t);
 void tb_stream_warm(tb_stream *s, int vi, double at);
 /* 1 when the segment that holds `at` is built (in the cache). Never waits: 0 while a build runs. */
 int tb_stream_ready(tb_stream *s, int vi, double at);
+/* Start time in seconds of segment seg of variant vi (segment 0: 0), or -1 when it is not known yet. May wait for a
+ * running segment build: not for the main thread. */
+double tb_stream_seg_start(tb_stream *s, int vi, int seg);
 
 typedef struct {
     int segments_built, cache_hits;

@@ -56,7 +56,7 @@ git clone --recursive https://github.com/theos/theos ~/theos
 git clone https://github.com/theos/sdks /tmp/sdks && cp -R /tmp/sdks/iPhoneOS9.3.sdk /tmp/sdks/iPhoneOS16.5.sdk ~/theos/sdks/
 brew install dpkg make ldid
 scripts/make_ios_sdk.sh      # a copy of the 9.3 SDK that today's linker accepts for armv7
-scripts/build_deps.sh        # OpenSSL 3.5.9 for armv7, arm64 and the Mac (SHA-256 checked)
+scripts/build_deps.sh        # OpenSSL 3.5.9 for armv7 (with its ARMv7 assembly), arm64 and the Mac (SHA-256 checked)
 scripts/package_all.sh       # the release files in dist/
 ```
 

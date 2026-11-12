@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-13
+
+### Changed
+- Shorts use less data: each Short buffers at most about 10 s ahead of what you watch. Before, it buffered up to about 50 s, and a swipe dropped the part you did not watch. On an iPad mini 1, the same 10 Shorts swiped every 3 s used 62 MB per minute instead of 90 MB with v0.2.0, and each swipe showed the next Short in 0.23 to 0.26 s (v0.2.0: 0.23 to 0.67 s).
+- OpenSSL for armv7 is built with its ARMv7 assembly: TLS uses about half the CPU (video: 0.17 to 0.21 s of CPU per MB instead of 0.40 to 0.44 s on an iPad mini 1).
+
+### Fixed
+- The watch page downloaded its data twice (about 330 KB instead of 14 KB) because YouTube moved the video title to a new place in its answer.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added

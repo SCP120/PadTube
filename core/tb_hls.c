@@ -19,7 +19,7 @@ static tb_stream *g_stream;
 static tb_live *g_live;
 static int g_order[8], g_norder;
 /* extra streams (tb_hls_add): their own generation numbers, far from g_gen so the two never meet */
-static struct { int gen; tb_stream *s; int limit, served; } g_extra[TB_HLS_EXTRA];
+static struct { int gen; tb_stream *s; int limit, served; double tlimit; } g_extra[TB_HLS_EXTRA];
 static pthread_cond_t g_gate = PTHREAD_COND_INITIALIZER;   /* a limit rose or a stream was removed */
 static int g_xgen = 1000000;
 static tb_hls_stats g_st;
@@ -128,12 +128,17 @@ static void serve(int fd, const char *path, int head_only) {
         log_req(path, t0, (long)strlen(pl), 200);
         free(pl);
     } else if (sscanf(tail, "%d/%d.ts", &vi, &seg) == 2) {
-        int open = 1, slot = -1;   /* preload gate: wait while seg is above the stream's limit */
+        int open = 1, slot = -1;   /* preload gate: wait while seg is above the stream's limits */
+        /* start times before g_mu: reading them may wait for a segment build */
+        double t_seg = tb_stream_seg_start(s, vi, seg), t_next = tb_stream_seg_start(s, vi, seg + 1);
         pthread_mutex_lock(&g_mu);
         for (;;) {
             slot = -1;
             for (int i = 0; i < TB_HLS_EXTRA; i++) if (g_extra[i].s == s && g_extra[i].gen == gen) slot = i;
-            if (slot < 0 || g_extra[slot].limit < 0 || seg <= g_extra[slot].limit) break;
+            if (slot < 0) break;
+            int seg_ok = g_extra[slot].limit < 0 || seg <= g_extra[slot].limit;
+            int time_ok = g_extra[slot].tlimit < 0 || t_seg <= g_extra[slot].tlimit;
+            if (seg_ok && time_ok) break;
             struct timespec ts;
             struct timeval tv;
             gettimeofday(&tv, NULL);
@@ -143,13 +148,14 @@ static void serve(int fd, const char *path, int head_only) {
         }
         if (slot < 0 && gen != g_gen) open = 0;   /* removed while waiting */
         int lim = slot >= 0 ? g_extra[slot].limit : -1;
+        int next_ok = slot < 0 || g_extra[slot].tlimit < 0 || (t_next >= 0 && t_next <= g_extra[slot].tlimit);
         pthread_mutex_unlock(&g_mu);
         if (!open) { tb_stream_release(s); reply(fd, 404, "text/plain", "", 0, 0); return; }
         tb_out o = {0};
         err = tb_stream_segment(s, vi, seg, &o);
         if (!err) {
             reply(fd, 200, "video/mp2t", o.p, o.len, head_only);
-            if (lim < 0 || seg + 1 <= lim) tb_stream_prefetch(s, vi, seg + 1);   /* not past the gate */
+            if ((lim < 0 || seg + 1 <= lim) && next_ok) tb_stream_prefetch(s, vi, seg + 1);   /* not past the gates */
             pthread_mutex_lock(&g_mu);
             if (slot >= 0 && g_extra[slot].s == s && seg > g_extra[slot].served) g_extra[slot].served = seg;
             pthread_mutex_unlock(&g_mu);
@@ -304,6 +310,7 @@ int tb_hls_add(tb_stream *s) {
             tb_stream_retain(s);
             g_extra[i].s = s;
             g_extra[i].limit = TB_HLS_OPEN;
+            g_extra[i].tlimit = -1;
             g_extra[i].served = -1;
             gen = g_extra[i].gen = ++g_xgen;
             break;
@@ -326,6 +333,13 @@ void tb_hls_limit(int gen, int max_seg) {
     pthread_mutex_lock(&g_mu);
     for (int i = 0; i < TB_HLS_EXTRA; i++)
         if (g_extra[i].s && g_extra[i].gen == gen) g_extra[i].limit = max_seg == TB_HLS_FREEZE ? (g_extra[i].served < 0 ? 0 : g_extra[i].served) : max_seg;
+    pthread_cond_broadcast(&g_gate);
+    pthread_mutex_unlock(&g_mu);
+}
+
+void tb_hls_limit_time(int gen, double max_start_s) {
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < TB_HLS_EXTRA; i++) if (g_extra[i].s && g_extra[i].gen == gen) g_extra[i].tlimit = max_start_s;
     pthread_cond_broadcast(&g_gate);
     pthread_mutex_unlock(&g_mu);
 }
