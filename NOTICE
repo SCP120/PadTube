@@ -1,0 +1,19 @@
+PadTube
+Copyright (c) 2026 PadTube contributors. MIT licence (LICENSE).
+
+PadTube is not affiliated with, endorsed by or sponsored by Google LLC or YouTube.
+YouTube is a trademark of Google LLC.
+
+This product includes or links:
+
+- OpenSSL 3.5.9, https://www.openssl.org/ - Apache License 2.0
+  (third_party/vendor/OpenSSL-LICENSE.txt). Built from the release tarball by scripts/build_deps.sh,
+  not changed.
+- yyjson 0.12.0, https://github.com/ibireme/yyjson - MIT (third_party/vendor/yyjson-LICENSE.txt)
+- QR Code generator library (C), Project Nayuki, https://www.nayuki.io/page/qr-code-generator-library
+  - MIT (third_party/vendor/qrcodegen-LICENSE.txt)
+- Root certificates (roots.pem in the app): the public CA certificate bundle of the macOS build machine
+  (/etc/ssl/cert.pem), used to check YouTube's TLS certificates on iOS versions with old root stores.
+
+Test builds only (SELFTEST=1, never in a release): QuickJS-NG (MIT) and the yt-dlp/ejs solver scripts
+(Unlicense; bundled meriyah, ISC). They are not in this repository; see tools/tbjs.c.

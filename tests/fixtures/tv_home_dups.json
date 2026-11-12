@@ -1,0 +1,10 @@
+{"contents":{"tvBrowseRenderer":{"content":{"tvSurfaceContentRenderer":{"content":{"sectionListRenderer":{"contents":[
+ {"shelfRenderer":{"title":{"simpleText":"Recommended"},"content":{"horizontalListRenderer":{"items":[
+  {"tileRenderer":{"contentId":"AAAAAAAAAA1","contentType":"TILE_CONTENT_TYPE_VIDEO","metadata":{"tileMetadataRenderer":{"title":{"simpleText":"Video one"},"lines":[{"lineRenderer":{"items":[{"lineItemRenderer":{"text":{"simpleText":"Chan A"}}}]}}]}}}},
+  {"tileRenderer":{"contentId":"RDAAAAAAAAAA2","contentType":"TILE_CONTENT_TYPE_PLAYLIST","onSelectCommand":{"browseEndpoint":{"browseId":"VLRDAAAAAAAAAA2"}},"metadata":{"tileMetadataRenderer":{"title":{"simpleText":"A mix"}}}}},
+  {"tileRenderer":{"contentId":"AAAAAAAAAA3","contentType":"TILE_CONTENT_TYPE_VIDEO","metadata":{"tileMetadataRenderer":{"title":{"simpleText":"Video three"}}}}}]}}}},
+ {"shelfRenderer":{"title":{"simpleText":"Because you watched"},"content":{"horizontalListRenderer":{"items":[
+  {"tileRenderer":{"contentId":"AAAAAAAAAA1","contentType":"TILE_CONTENT_TYPE_VIDEO","metadata":{"tileMetadataRenderer":{"title":{"simpleText":"Video one"}}}}},
+  {"lockupViewModel":{"contentId":"RDCMUCxxxxAAAAAAAAAA2","contentType":"LOCKUP_CONTENT_TYPE_PLAYLIST","contentImage":{"collectionThumbnailViewModel":{"primaryThumbnail":{"thumbnailViewModel":{"image":{"sources":[{"url":"https://i.ytimg.com/vi/AAAAAAAAAA2/hqdefault.jpg","width":320}]}}}}},"metadata":{"lockupMetadataViewModel":{"title":{"content":"A mix (second renderer)"}}}}},
+  {"tileRenderer":{"contentId":"AAAAAAAAAA4","contentType":"TILE_CONTENT_TYPE_VIDEO","metadata":{"tileMetadataRenderer":{"title":{"simpleText":"Video four"}}}}}]}}}}
+]}}}}}}}

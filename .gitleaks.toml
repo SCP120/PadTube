@@ -1,0 +1,12 @@
+# gitleaks: the default rules, plus one narrow exception. The recorded YouTube answers in tests/fixtures/yt hold paging
+# tokens ("token") and entity keys ("overrideEntityKey"). They are public paging data of a signed-out request, not
+# credentials; gitleaks' generic-api-key rule matches their name. The exception looks only at the matched text, so a
+# real key elsewhere in the same file is still found (tested with a planted Google API key, gitleaks 8.30.1). A "paths"
+# entry is not used: in 8.30.1 it hid every finding in those files.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Public paging data in recorded YouTube answers"
+regexTarget = "match"
+regexes = ['''^(token|overrideEntityKey)"''']

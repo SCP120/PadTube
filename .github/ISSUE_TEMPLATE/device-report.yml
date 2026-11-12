@@ -1,0 +1,33 @@
+name: Device report
+description: PadTube on your iPad, working or not. Do not paste sign-in codes, tokens or your account name.
+title: "Device report: <iPad model>, iOS <version>"
+labels: ["device report"]
+body:
+  - type: input
+    id: device
+    attributes: {label: iPad model, placeholder: iPad mini 1}
+    validations: {required: true}
+  - type: input
+    id: ios
+    attributes: {label: iOS version, placeholder: "9.3.5"}
+    validations: {required: true}
+  - type: dropdown
+    id: route
+    attributes:
+      label: Install route
+      options: [Sideloadly, TrollStore, Rootful jailbreak package, Rootless jailbreak package, Other]
+    validations: {required: true}
+  - type: checkboxes
+    id: works
+    attributes:
+      label: What works
+      options:
+        - label: The app opens and fills the screen
+        - label: Home and search show videos
+        - label: A video plays with sound
+        - label: Sound goes on when the screen is locked
+        - label: Sign-in with a code
+        - label: Rotation, Light and Dark
+  - type: textarea
+    id: notes
+    attributes: {label: What went wrong, description: "What you did, what you saw. Do not paste sign-in codes, tokens or your account name."}
